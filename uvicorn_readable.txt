@@ -1,0 +1,1000 @@
+﻿grams\Python\Python311\
+Lib\site-packages\starl
+ette\applications.py", 
+line 107, in __call__
+    |     await self.mi
+ddleware_stack(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\errors.
+py", line 186, in 
+__call__
+    |     raise exc
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\errors.
+py", line 164, in 
+__call__
+    |     await 
+self.app(scope, 
+receive, _send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\cors.py
+", line 95, in __call__
+    |     await self.si
+mple_response(scope, 
+receive, send, request_
+headers=headers)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\cors.py
+", line 153, in 
+simple_response
+    |     await 
+self.app(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\excepti
+ons.py", line 63, in 
+__call__
+    |     await wrap_ap
+p_handling_exceptions(s
+elf.app, conn)(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_exception_handler
+.py", line 53, in 
+wrapped_app
+    |     raise exc
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_exception_handler
+.py", line 42, in 
+wrapped_app
+    |     await 
+app(scope, receive, 
+sender)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\fasta
+pi\middleware\asyncexit
+stack.py", line 18, in 
+__call__
+    |     await 
+self.app(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\routing.py", line 
+716, in __call__
+    |     await self.mi
+ddleware_stack(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\routing.py", line 
+736, in app
+    |     await 
+route.handle(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\routing.py", line 
+290, in handle
+    |     await 
+self.app(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\fasta
+pi\routing.py", line 
+121, in app
+    |     await wrap_ap
+p_handling_exceptions(a
+pp, request)(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_exception_handler
+.py", line 53, in 
+wrapped_app
+    |     raise exc
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_exception_handler
+.py", line 42, in 
+wrapped_app
+    |     await 
+app(scope, receive, 
+sender)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\fasta
+pi\routing.py", line 
+108, in app
+    |     await 
+response(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\responses.py", 
+line 269, in __call__
+    |     with 
+collapse_excgroups():
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\contextlib.py", 
+line 158, in __exit__
+    |     
+self.gen.throw(typ, 
+value, traceback)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_utils.py", line 
+85, in 
+collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\responses.py", 
+line 273, in wrap
+    |     await func()
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\responses.py", 
+line 253, in 
+stream_response
+    |     async for 
+chunk in 
+self.body_iterator:
+    |   File "C:\Users\
+adepu\OneDrive\Desktop\
+ai-career-navigator\app
+_backend.py", line 
+379, in _stream_agent
+    |     types.Part.fr
+om_function_response(
+    | TypeError: Part.f
+rom_function_response()
+ got an unexpected 
+keyword argument 'id'
+    +------------------
+------------------
+
+During handling of the 
+above exception, 
+another exception 
+occurred:
+
+Traceback (most recent 
+call last):
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\uvicorn\pro
+tocols\http\httptools_i
+mpl.py", line 416, in 
+run_asgi
+    result = await 
+app(  # type: ignore[fu
+nc-returns-value]
+             ^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\uvicorn\mid
+dleware\proxy_headers.p
+y", line 60, in 
+__call__
+    return await 
+self.app(scope, 
+receive, send)
+           ^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+^
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\fastapi\app
+lications.py", line 
+1138, in __call__
+    await super().__cal
+l__(scope, receive, 
+send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\a
+pplications.py", line 
+107, in __call__
+    await self.middlewa
+re_stack(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\errors.py", 
+line 186, in __call__
+    raise exc
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\errors.py", 
+line 164, in __call__
+    await 
+self.app(scope, 
+receive, _send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\cors.py", 
+line 95, in __call__
+    await self.simple_r
+esponse(scope, 
+receive, send, request_
+headers=headers)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\cors.py", 
+line 153, in 
+simple_response
+    await 
+self.app(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\exceptions.py
+", line 63, in __call__
+    await wrap_app_hand
+ling_exceptions(self.ap
+p, conn)(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+exception_handler.py", 
+line 53, in wrapped_app
+    raise exc
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+exception_handler.py", 
+line 42, in wrapped_app
+    await app(scope, 
+receive, sender)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\fastapi\mid
+dleware\asyncexitstack.
+py", line 18, in 
+__call__
+    await 
+self.app(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+outing.py", line 716, 
+in __call__
+    await self.middlewa
+re_stack(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+outing.py", line 736, 
+in app
+    await 
+route.handle(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+outing.py", line 290, 
+in handle
+    await 
+self.app(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\fastapi\rou
+ting.py", line 121, in 
+app
+    await wrap_app_hand
+ling_exceptions(app, 
+request)(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+exception_handler.py", 
+line 53, in wrapped_app
+    raise exc
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+exception_handler.py", 
+line 42, in wrapped_app
+    await app(scope, 
+receive, sender)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\fastapi\rou
+ting.py", line 108, in 
+app
+    await 
+response(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+esponses.py", line 
+269, in __call__
+    with 
+collapse_excgroups():
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\co
+ntextlib.py", line 
+158, in __exit__
+    
+self.gen.throw(typ, 
+value, traceback)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+utils.py", line 85, in 
+collapse_excgroups
+    raise exc
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+esponses.py", line 
+273, in wrap
+    await func()
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+esponses.py", line 
+253, in stream_response
+    async for chunk in 
+self.body_iterator:
+  File "C:\Users\adepu\
+OneDrive\Desktop\ai-car
+eer-navigator\app_backe
+nd.py", line 379, in 
+_stream_agent
+    types.Part.from_fun
+ction_response(
+TypeError: Part.from_fu
+nction_response() got 
+an unexpected keyword 
+argument 'id'
+
+[SEARCH] Processing query: 'Software Engineer jobs'
+[SEARCH] Winner: Google-CSE
+[DDGS] Failed: https://links.duckduckgo.com/d.js?q=Software+Engineer+jobs&kl=wt-wt&l=wt-wt&p=&s=0&df=&vqd=4-79398314350479170528084175308105667704&bing_market=wt-wt&ex=-1 202 Ratelimit
+INFO:     127.0.0.1:54277 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54277 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54277 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54277 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58595 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58595 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55468 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57023 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61378 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61378 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64085 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64085 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56376 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56376 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56376 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56376 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52809 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52809 - "POST /chat/stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64491 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50454 - "GET /usage HTTP/1.1" 200 OK
+2026-03-10 
+17:26:30,595 [INFO] 
+HTTP Request: POST http
+s://generativelanguage.
+googleapis.com/v1beta/m
+odels/gemini-2.5-flash:
+generateContent 
+"HTTP/1.1 200 OK"
+INFO:     127.0.0.1:50454 - "GET /usage HTTP/1.1" 200 OK
+2026-03-10 
+17:26:31,336 [INFO] 
+[Tool] \u25b6 
+get_realtime_data  
+{'query': 'Software 
+Engineer jobs'}
+2026-03-10 
+17:26:31,336 [ERROR] 
+[Tool] 
+get_realtime_data 
+exception: Part.from_fu
+nction_response() got 
+an unexpected keyword 
+argument 'id'
+ERROR:    Exception in 
+ASGI application
+  + Exception Group 
+Traceback (most recent 
+call last):
+  |   File "C:\Users\ad
+epu\AppData\Local\Progr
+ams\Python\Python311\Li
+b\site-packages\starlet
+te\_utils.py", line 
+79, in 
+collapse_excgroups
+  |     yield
+  |   File "C:\Users\ad
+epu\AppData\Local\Progr
+ams\Python\Python311\Li
+b\site-packages\starlet
+te\responses.py", line 
+270, in __call__
+  |     async with anyi
+o.create_task_group() 
+as task_group:
+  |   File "C:\Users\ad
+epu\AppData\Local\Progr
+ams\Python\Python311\Li
+b\site-packages\anyio\_
+backends\_asyncio.py", 
+line 783, in __aexit__
+  |     raise 
+BaseExceptionGroup(
+  | ExceptionGroup: 
+unhandled errors in a 
+TaskGroup (1 
+sub-exception)
+  +-+---------------- 
+1 ----------------
+    | Traceback (most 
+recent call last):
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\uvico
+rn\protocols\http\httpt
+ools_impl.py", line 
+416, in run_asgi
+    |     result = 
+await app(  # type: ign
+ore[func-returns-value]
+    |              ^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\uvico
+rn\middleware\proxy_hea
+ders.py", line 60, in 
+__call__
+    |     return await 
+self.app(scope, 
+receive, send)
+    |            ^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\fasta
+pi\applications.py", 
+line 1138, in __call__
+    |     await super()
+.__call__(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\applications.py", 
+line 107, in __call__
+    |     await self.mi
+ddleware_stack(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\errors.
+py", line 186, in 
+__call__
+    |     raise exc
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\errors.
+py", line 164, in 
+__call__
+    |     await 
+self.app(scope, 
+receive, _send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\cors.py
+", line 95, in __call__
+    |     await self.si
+mple_response(scope, 
+receive, send, request_
+headers=headers)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\cors.py
+", line 153, in 
+simple_response
+    |     await 
+self.app(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\middleware\excepti
+ons.py", line 63, in 
+__call__
+    |     await wrap_ap
+p_handling_exceptions(s
+elf.app, conn)(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_exception_handler
+.py", line 53, in 
+wrapped_app
+    |     raise exc
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_exception_handler
+.py", line 42, in 
+wrapped_app
+    |     await 
+app(scope, receive, 
+sender)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\fasta
+pi\middleware\asyncexit
+stack.py", line 18, in 
+__call__
+    |     await 
+self.app(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\routing.py", line 
+716, in __call__
+    |     await self.mi
+ddleware_stack(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\routing.py", line 
+736, in app
+    |     await 
+route.handle(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\routing.py", line 
+290, in handle
+    |     await 
+self.app(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\fasta
+pi\routing.py", line 
+121, in app
+    |     await wrap_ap
+p_handling_exceptions(a
+pp, request)(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_exception_handler
+.py", line 53, in 
+wrapped_app
+    |     raise exc
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_exception_handler
+.py", line 42, in 
+wrapped_app
+    |     await 
+app(scope, receive, 
+sender)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\fasta
+pi\routing.py", line 
+108, in app
+    |     await 
+response(scope, 
+receive, send)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\responses.py", 
+line 269, in __call__
+    |     with 
+collapse_excgroups():
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\contextlib.py", 
+line 158, in __exit__
+    |     
+self.gen.throw(typ, 
+value, traceback)
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\_utils.py", line 
+85, in 
+collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\responses.py", 
+line 273, in wrap
+    |     await func()
+    |   File "C:\Users\
+adepu\AppData\Local\Pro
+grams\Python\Python311\
+Lib\site-packages\starl
+ette\responses.py", 
+line 253, in 
+stream_response
+    |     async for 
+chunk in 
+self.body_iterator:
+    |   File "C:\Users\
+adepu\OneDrive\Desktop\
+ai-career-navigator\app
+_backend.py", line 
+379, in _stream_agent
+    |     types.Part.fr
+om_function_response(
+    | TypeError: Part.f
+rom_function_response()
+ got an unexpected 
+keyword argument 'id'
+    +------------------
+------------------
+
+During handling of the 
+above exception, 
+another exception 
+occurred:
+
+Traceback (most recent 
+call last):
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\uvicorn\pro
+tocols\http\httptools_i
+mpl.py", line 416, in 
+run_asgi
+    result = await 
+app(  # type: ignore[fu
+nc-returns-value]
+             ^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\uvicorn\mid
+dleware\proxy_headers.p
+y", line 60, in 
+__call__
+    return await 
+self.app(scope, 
+receive, send)
+           ^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+^
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\fastapi\app
+lications.py", line 
+1138, in __call__
+    await super().__cal
+l__(scope, receive, 
+send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\a
+pplications.py", line 
+107, in __call__
+    await self.middlewa
+re_stack(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\errors.py", 
+line 186, in __call__
+    raise exc
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\errors.py", 
+line 164, in __call__
+    await 
+self.app(scope, 
+receive, _send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\cors.py", 
+line 95, in __call__
+    await self.simple_r
+esponse(scope, 
+receive, send, request_
+headers=headers)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\cors.py", 
+line 153, in 
+simple_response
+    await 
+self.app(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\m
+iddleware\exceptions.py
+", line 63, in __call__
+    await wrap_app_hand
+ling_exceptions(self.ap
+p, conn)(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+exception_handler.py", 
+line 53, in wrapped_app
+    raise exc
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+exception_handler.py", 
+line 42, in wrapped_app
+    await app(scope, 
+receive, sender)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\fastapi\mid
+dleware\asyncexitstack.
+py", line 18, in 
+__call__
+    await 
+self.app(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+outing.py", line 716, 
+in __call__
+    await self.middlewa
+re_stack(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+outing.py", line 736, 
+in app
+    await 
+route.handle(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+outing.py", line 290, 
+in handle
+    await 
+self.app(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\fastapi\rou
+ting.py", line 121, in 
+app
+    await wrap_app_hand
+ling_exceptions(app, 
+request)(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+exception_handler.py", 
+line 53, in wrapped_app
+    raise exc
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+exception_handler.py", 
+line 42, in wrapped_app
+    await app(scope, 
+receive, sender)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\fastapi\rou
+ting.py", line 108, in 
+app
+    await 
+response(scope, 
+receive, send)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+esponses.py", line 
+269, in __call__
+    with 
+collapse_excgroups():
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\co
+ntextlib.py", line 
+158, in __exit__
+    
+self.gen.throw(typ, 
+value, traceback)
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\_
+utils.py", line 85, in 
+collapse_excgroups
+    raise exc
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+esponses.py", line 
+273, in wrap
+    await func()
+  File "C:\Users\adepu\
+AppData\Local\Programs\
+Python\Python311\Lib\si
+te-packages\starlette\r
+esponses.py", line 
+253, in stream_response
+    async for chunk in 
+self.body_iterator:
+  File "C:\Users\adepu\
+OneDrive\Desktop\ai-car
+eer-navigator\app_backe
+nd.py", line 379, in 
+_stream_agent
+    types.Part.from_fun
+ction_response(
+TypeError: Part.from_fu
+nction_response() got 
+an unexpected keyword 
+argument 'id'
+[Cache] Hit for 'Software Engineer jobs'
+INFO:     127.0.0.1:60356 - "GET /usage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60356 - "GET /usage HTTP/1.1" 200 OK
+WARNING:  WatchFiles 
+detected changes in 
+'log_analyzer.py'. 
+Reloading...
+ INFO:     127.0.0.1:60356 - "GET /usage HTTP/1.1" 200 OK

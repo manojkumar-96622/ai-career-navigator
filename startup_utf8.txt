@@ -1,0 +1,40 @@
+﻿.\venv\Scripts\python.e
+xe : INFO:     Started 
+server process [21520]
+At line:1 char:1
++ .\venv\Scripts\python
+.exe -m uvicorn 
+app_backend:app --port 
+8000 > st ...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (INFO:     Sta   
+ rted server proces    
+s [21520]:String)     
+[], RemoteExceptio    n
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+INFO:     Waiting for 
+application startup.
+INFO:     Application 
+startup complete.
+ERROR:    [Errno 
+10048] error while 
+attempting to bind on 
+address ('127.0.0.1', 
+8000): only one usage 
+of each socket address 
+(protocol/network 
+address/port) is 
+normally permitted
+INFO:     Waiting for 
+application shutdown.
+INFO:     Application 
+shutdown complete.
+[Search] DuckDuckGo (duckduckgo_search) loaded OK

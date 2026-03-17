@@ -1,0 +1,164 @@
+[
+  {
+    "timestamp": "2026-02-22 20:49:01",
+    "session_id": "aria_1771773453006",
+    "message_id": "a_1771773512646",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-02-22 20:49:02",
+    "session_id": "aria_1771773453006",
+    "message_id": "a_1771773512646",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-02-22 20:49:04",
+    "session_id": "aria_1771773453006",
+    "message_id": "a_1771773512646",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-02-22 20:49:05",
+    "session_id": "aria_1771773453006",
+    "message_id": "a_1771773512646",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-02-22 21:44:49",
+    "session_id": "aria_1771776302258",
+    "message_id": "a_1771776879082",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-02-23 22:57:20",
+    "session_id": "aria_1771867604144",
+    "message_id": "a_1771867627331",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-02-24 12:02:09",
+    "session_id": "aria_1771914614800",
+    "message_id": "a_1771914698480",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-02-24 12:02:09",
+    "session_id": "aria_1771914614800",
+    "message_id": "a_1771914698480",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-02-25 22:12:06",
+    "session_id": "aria_1772037623820",
+    "message_id": "a_1772037675660",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-02-25 22:12:06",
+    "session_id": "aria_1772037623820",
+    "message_id": "a_1772037675660",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-02-25 22:12:06",
+    "session_id": "aria_1772037623820",
+    "message_id": "a_1772037675660",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-02-25 22:12:07",
+    "session_id": "aria_1772037623820",
+    "message_id": "a_1772037675660",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-02-26 22:14:38",
+    "session_id": "aria_1772120589642",
+    "message_id": "a_1772120610611",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-02-26 22:30:23",
+    "session_id": "aria_1772120589642",
+    "message_id": "a_1772120610611",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-02-26 22:30:24",
+    "session_id": "aria_1772120589642",
+    "message_id": "a_1772120610611",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-04 17:43:29",
+    "session_id": "general",
+    "message_id": "1772626355401_a",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-04 17:43:30",
+    "session_id": "general",
+    "message_id": "1772626355401_a",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-05 21:44:32",
+    "session_id": "career",
+    "message_id": "1772727269700",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-03-05 21:44:34",
+    "session_id": "career",
+    "message_id": "1772727269700",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-06 13:57:36",
+    "session_id": "general",
+    "message_id": "1772785654660",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-03-06 13:57:37",
+    "session_id": "general",
+    "message_id": "1772785654660",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-06 13:57:50",
+    "session_id": "general",
+    "message_id": "1772785654660",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-07 22:23:09",
+    "session_id": "general",
+    "message_id": "1772902381797",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-03-07 22:23:10",
+    "session_id": "general",
+    "message_id": "1772902381797",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-11 10:09:31",
+    "session_id": "general",
+    "message_id": "1773203964986_a",
+    "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-11 15:07:05",
+    "session_id": "general",
+    "message_id": "1773221812769_a",
+    "rating": "up"
+  },
+  {
+    "timestamp": "2026-03-11 15:07:07",
+    "session_id": "general",
+    "message_id": "1773221812769_a",
+    "rating": "down"
+  }
+]

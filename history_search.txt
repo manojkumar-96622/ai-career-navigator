@@ -1,0 +1,5 @@
+Matches: ['_comprehensive_history', '_curated_history', 'get_history', 'record_history']
+_comprehensive_history type: <class 'list'>
+_curated_history type: <class 'list'>
+get_history type: <class 'method'>
+record_history type: <class 'method'>

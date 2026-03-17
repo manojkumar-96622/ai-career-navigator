@@ -1,0 +1,1941 @@
+"use client";
+
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import {
+  Zap, Bot, Eye, Hand, Shield, Briefcase, Scale, TrendingUp, Heart,
+  Send, X, Hexagon, Smile, Mic, Paperclip, Camera,
+  Copy, Volume2, ThumbsUp, ThumbsDown, Check, RefreshCw,
+  Frown, AlertCircle, HeartCrack, CloudRain, User, Angry, Brain, Wind,
+  ChevronDown, Search, BarChart2, Palette, Music
+} from "lucide-react";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'framer-motion';
+import { analyzeEmotion } from "./emotionEngine";
+const PLANETS = [
+  { id: "atlas", name: "ATLAS Master Mode", radius: 110, color: "#f59e0b", icon: Zap, speed: 16, suggestions: ["Scan system logs", "Optimize codebase", "Run full diagnostics"] },
+  { id: "general", name: "General Assistant", radius: 155, color: "#06b6d4", icon: Bot, speed: 18, suggestions: ["Help me write an email", "Explain quantum computing", "Plan my week"] },
+  { id: "vision", name: "Vision Mode", radius: 200, color: "#8b5cf6", icon: Eye, speed: 20, suggestions: ["Describe this image", "Read text from photo", "Analyze graph trends"] },
+  { id: "sign", name: "Sign Detection", radius: 245, color: "#10b981", icon: Hand, speed: 22, suggestions: ["Translate ASL phrase", "Teach me alphabet", "Identify this gesture"] },
+  { id: "shield", name: "Shield Mode", radius: 290, color: "#ef4444", icon: Shield, speed: 24, suggestions: ["Check for phishing", "Review privacy settings", "Scan for malware"] },
+  { id: "career", name: "Career Rescue Mode", radius: 335, color: "#0ea5e9", icon: Briefcase, speed: 26, suggestions: ["Review my resume", "Prepare for interview", "Find remote jobs"] },
+  { id: "legal", name: "Legal Shield Mode", radius: 380, color: "#f97316", icon: Scale, speed: 28, suggestions: ["Explain my tenant rights", "Review this contract", "Help with copyright"] },
+  { id: "finance", name: "Finance Guard Mode", radius: 425, color: "#22c55e", icon: TrendingUp, speed: 30, suggestions: ["Build a monthly budget", "Explain mutual funds", "Check MSME loans"] },
+  { id: "health", name: "Health Navigator Mode", radius: 470, color: "#fb7185", icon: Heart, speed: 32, suggestions: ["Find Nearest Hospital", "Check Health Schemes", "Draft Sick Leave"] },
+  { id: "mind", name: "Mind Support Mode", radius: 515, color: "#ec4899", icon: Smile, speed: 34, suggestions: ["I feel overwhelmed", "Quick breathing exercise", "Help me sleep"] },
+];
+const PLANET_DETAILS = {
+  atlas: "Advanced Master Mode for complex cross-domain reasoning and recursive task orchestration.",
+  general: "Your versatile companion for daily tasks, rapid information retrieval, and creative brainstorming.",
+  vision: "Equipped with advanced visual processing to analyze images, read diagrams, and interpret physical scenes.",
+  sign: "Specialized in hand gesture recognition and ASL translation for accessible communication.",
+  shield: "Security-first mode designed to detect vulnerabilities, scan for threats, and ensure data privacy.",
+  career: "Expert career strategist and resume optimizer to help you navigate the modern job market.",
+  legal: "Precision legal analysis tool for parsing contracts, explaining regulations, and assessing compliance.",
+  finance: "Intelligent market analyzer and budgeting specialist for data-driven financial planning.",
+  health: "Medical document parser and healthcare system navigator to decode diagnoses and streamline hospital procedures.",
+  mind: "Empathetic support agent focused on mental well-being, mindfulness, and emotional guidance.",
+};
+
+// --- MEMOIZED PERFORMANCE COMPONENTS ---
+
+const MemoizedStars = React.memo(({ stars }: { stars: any[] }) => (
+  <div className="fixed inset-0 pointer-events-none z-0">
+    {stars.map((star, i) => (
+      <div
+        key={i}
+        className="absolute rounded-full bg-white"
+        style={{
+          left: `${star.x}%`,
+          top: `${star.y}%`,
+          width: star.size,
+          height: star.size,
+          opacity: star.twinkle ? undefined : star.opacity,
+          backfaceVisibility: 'hidden',
+          WebkitBackfaceVisibility: 'hidden',
+          transform: 'translateZ(0)',
+          willChange: star.twinkle ? 'opacity' : 'transform',
+          /* animation: star.twinkle
+            ? `twinkle ${star.duration}s ease-in-out infinite ${star.delay}s`
+            : undefined */
+        }}
+      />
+    ))}
+  </div>
+));
+
+const ChatInput = React.memo(({ 
+  onSend, 
+  activeAgent, 
+  selectedFile, 
+  setSelectedFile,
+  isRecording,
+  toggleRecording,
+  fileInputRef,
+  handleFileChange,
+  startWebcam,
+  soundOn
+}: any) => {
+  const [localValue, setLocalValue] = useState("");
+  const [isFocused, setIsFocused] = useState(false);
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (localValue.trim() || selectedFile) {
+      onSend(localValue);
+      setLocalValue("");
+    }
+  };
+
+  return (
+    <div className="p-6 shrink-0 border-t border-white/[0.08] bg-black/40 backdrop-blur-md">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        
+        {/* Suggestion Chips - Now More Subtle */}
+        {!localValue && activeAgent.suggestions && (
+          <div className="flex flex-wrap gap-2 justify-center pb-2">
+            {activeAgent.suggestions.map((suggestion: string, idx: number) => (
+              <button
+                type="button"
+                key={idx}
+                onClick={() => setLocalValue(suggestion)}
+                className="px-4 py-1.5 rounded-full text-[10px] font-semibold tracking-wide border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-gray-400 hover:text-white whitespace-nowrap active:scale-95"
+                style={{ borderColor: `${activeAgent.color}30`, color: activeAgent.color }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="relative flex items-end gap-3 bg-white/[0.03] border border-white/10 rounded-[2rem] p-2 transition-all group-focus-within:border-white/20"
+             style={{ 
+               borderColor: isFocused ? `${activeAgent.color}40` : 'rgba(255,255,255,0.1)',
+               boxShadow: isFocused ? `0 0 30px ${activeAgent.color}15` : 'none'
+             }}
+        >
+          {/* File Upload Hidden Input */}
+          <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} accept=".pdf,.doc,.docx,.txt" />
+
+          {/* Action Buttons Inside Bar */}
+          <div className="flex items-center gap-1 pl-2 mb-1.5">
+            <button 
+              type="button" 
+              onClick={() => fileInputRef.current?.click()} 
+              className="p-2.5 rounded-xl hover:bg-white/10 transition-all text-gray-500 hover:text-white group"
+            >
+              <Paperclip className="w-5 h-5" />
+            </button>
+            <button 
+              type="button" 
+              onClick={toggleRecording} 
+              className={`p-2.5 rounded-xl transition-all ${isRecording ? 'text-red-500 animate-pulse bg-red-500/10' : 'text-gray-500 hover:text-white hover:bg-white/10'}`}
+            >
+              <Mic className="w-5 h-5" />
+            </button>
+            {(activeAgent.id === "vision" || activeAgent.id === "sign") && (
+              <button 
+                type="button" 
+                onClick={startWebcam} 
+                className="p-2.5 rounded-xl hover:bg-white/10 transition-all text-gray-500 hover:text-white"
+              >
+                <Camera className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex-1 relative">
+            {selectedFile && (
+              <div className="absolute -top-16 left-0 bg-[#161b22] border border-white/10 rounded-2xl px-4 py-2 flex items-center gap-3 text-sm text-gray-300 shadow-2xl backdrop-blur-xl z-20 animate-in fade-in slide-in-from-bottom-2">
+                <Paperclip className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="truncate max-w-[180px] font-medium">{selectedFile.name}</span>
+                <button type="button" onClick={() => setSelectedFile(null)} className="p-1 rounded-md hover:bg-white/10 text-gray-500">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            
+            <textarea
+              value={localValue}
+              onChange={(e) => setLocalValue(e.target.value)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit();
+                }
+              }}
+              placeholder={isRecording ? "Listening..." : "Type your query for ARIA..."}
+              className="w-full bg-transparent border-none text-white text-[15px] pl-2 pr-14 py-3 focus:outline-none resize-none min-h-[48px] max-h-[200px] overflow-y-auto scrollbar-hide"
+              rows={1}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={!localValue.trim() && !selectedFile}
+            className="absolute right-2 bottom-2 w-11 h-11 rounded-2xl transition-all disabled:opacity-30 disabled:grayscale flex items-center justify-center text-white shadow-xl hover:scale-105 active:scale-95"
+            style={{ 
+              backgroundColor: activeAgent.color,
+              boxShadow: `0 8px 20px ${activeAgent.color}40`
+            }}
+          >
+            <Send className="w-5 h-5" />
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+});
+
+const MemoizedChatMessage = React.memo(({
+  msg,
+  activeAgent,
+  handleCopy,
+  handleSpeak,
+  handleFeedback,
+  copiedId
+}: {
+  msg: any,
+  activeAgent: any,
+  handleCopy: (t: string, id: string) => void,
+  handleSpeak: (t: string) => void,
+  handleFeedback: (aid: string, mid: string, dir: "up" | "down") => Promise<void> | void,
+  copiedId: string | null
+}) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 15, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+      className={`chat-message flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} hardware-accelerated mb-4`}
+    >
+      <div
+        className={`max-w-[96%] lg:max-w-[85%] rounded-[2rem] px-6 lg:px-8 py-4 lg:py-6 text-[15px] leading-relaxed shadow-xl transition-all duration-300 ${msg.sender === 'user'
+          ? 'user-bubble text-white'
+          : 'agent-bubble text-gray-100'
+          }`}
+        style={msg.sender === 'agent' ? { '--agent-color': activeAgent.color } as any : {}}
+      >
+        {msg.sender === 'agent' && (
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="p-1.5 rounded-lg bg-black/40 border border-white/5">
+              <activeAgent.icon className="w-4 h-4" style={{ color: activeAgent.color }} />
+            </div>
+            <span className="text-[11px] font-bold uppercase tracking-[0.15em] opacity-90" style={{ color: activeAgent.color }}>
+              {activeAgent.name.split(' ')[0]} AI
+            </span>
+          </div>
+        )}
+        <div className={`prose ${msg.sender === 'user' ? 'prose-invert prose-p:text-white/95' : 'prose-invert prose-p:text-gray-200 prose-headings:text-white prose-strong:text-white prose-em:text-gray-300 prose-a:text-cyan-400'} prose-p:leading-relaxed max-w-none text-[15.5px]`}>
+          {msg.attachment && (
+            <div className="mb-5 rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
+              {msg.attachment.type.startsWith('image/') ? (
+                <img
+                  src={msg.attachment.url}
+                  alt={msg.attachment.name}
+                  className="w-full h-auto max-h-72 object-cover hover:scale-[1.02] transition-transform duration-500"
+                />
+              ) : (
+                <div className="flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 transition-colors">
+                  <div className="p-2.5 bg-cyan-500/20 rounded-xl border border-cyan-500/20">
+                    <Paperclip className="w-6 h-6 text-cyan-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">{msg.attachment.name}</p>
+                    <p className="text-[10px] text-gray-500 uppercase font-bold tracking-[0.2em] mt-0.5">{msg.attachment.type.split('/')[1] || 'FILE'}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {msg.text && (
+            msg.text.includes("🧠") || msg.text.includes("⚙️") ? (
+              <div className="flex flex-col gap-3 py-2">
+                <div 
+                  className="text-sm font-medium tracking-wide flex items-center gap-3" 
+                  style={{ color: activeAgent.color }}
+                >
+                  <span className="animate-pulse">{msg.text}</span>
+                  <div className="thinking-processing">
+                    <div className="thinking-dot" />
+                    <div className="thinking-dot" />
+                    <div className="thinking-dot" />
+                  </div>
+                </div>
+                {/* Subtle skeleton bar */}
+                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden relative">
+                  <div 
+                    className="absolute inset-0 w-1/3 h-full rounded-full animate-[shimmer_2s_infinite]"
+                    style={{ 
+                      background: `linear-gradient(90deg, transparent, ${activeAgent.color}40, transparent)`,
+                    }} 
+                  />
+                </div>
+              </div>
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw]}
+                components={{
+                  a: ({ ...props }) => (
+                    <a {...props} className="text-cyan-400 hover:text-cyan-300 underline underline-offset-4 decoration-current/30 hover:decoration-current transition-all" target="_blank" rel="noopener noreferrer">
+                      {props.children}
+                    </a>
+                  ),
+                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-sm lg:text-base">{children}</p>,
+                  pre: ({ ...props }) => (
+                    <div className="relative group my-5">
+                      <pre className="p-5 rounded-2xl bg-[#080b12] border border-white/10 overflow-x-auto shadow-2xl custom-scrollbar" {...props} />
+                      <button
+                        onClick={() => {
+                          const code = (props.children as any)?.props?.children;
+                          if (code) navigator.clipboard.writeText(String(code));
+                        }}
+                        className="absolute top-3 right-3 p-2 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all backdrop-blur-md"
+                        title="Copy code"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ),
+                  table: ({ children }) => (
+                    <div className="my-4 overflow-x-auto rounded-xl border border-white/10 premium-glass custom-scrollbar">
+                      <table className="min-w-[1000px] w-full text-left border-collapse table-auto text-[13px] leading-relaxed">
+                        {children}
+                      </table>
+                    </div>
+                  ),
+                  thead: ({ ...props }) => <thead className="text-[11px] uppercase tracking-widest bg-white/[0.03] text-white" {...props} />,
+                  th: ({ ...props }) => <th className="px-5 py-3 border-b border-white/10 font-bold" {...props} />,
+                  td: ({ ...props }) => <td className="px-5 py-3 border-b border-white/[0.05]" {...props} />,
+                  ul: ({ ...props }) => <ul className="list-disc pl-6 mb-5 space-y-2 marker:text-cyan-500/60" {...props} />,
+                  ol: ({ ...props }) => <ol className="list-decimal pl-6 mb-5 space-y-2 marker:text-cyan-500/60 font-medium" {...props} />,
+                  li: ({ ...props }) => <li className="pl-1" {...props} />,
+                  strong: ({ ...props }) => <strong className="font-bold text-white tracking-tight" {...props} />,
+                  code: ({ className, children, ...props }: any) => {
+                    const match = /language-(\w+)/.exec(className || '');
+                    if (match || String(children).includes('\n')) {
+                      return (
+                        <code className="font-mono text-[13.5px] text-gray-300 leading-relaxed block" {...props}>
+                          {children}
+                        </code>
+                      );
+                    }
+                    return (
+                      <code className="px-1.5 py-0.5 rounded-md bg-white/10 font-mono text-[13px] text-cyan-300" {...props}>
+                        {children}
+                      </code>
+                    );
+                  }
+                }}
+              >
+                {msg.text}
+              </ReactMarkdown>
+            )
+          )}
+
+          {/* Link Chips from open_urls / map_url events */}
+          {msg.linkChips && msg.linkChips.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {msg.linkChips.map((chip: { label: string; url: string }, i: number) => (
+                <a
+                  key={i}
+                  href={chip.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 hover:text-cyan-300 transition-all"
+                >
+                  🔗 {chip.label}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-4 mt-4 pt-3 border-t border-white/[0.04]">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => handleCopy(msg.text, msg.id)}
+              className="p-2 rounded-lg hover:bg-white/10 transition-colors text-gray-500 hover:text-white"
+              title="Copy message"
+            >
+              {copiedId === msg.id ? (
+                <Check className="w-4 h-4 text-emerald-500" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+
+            <button
+              onClick={() => handleSpeak(msg.text)}
+              className="p-2 rounded-lg hover:bg-white/10 transition-colors text-gray-500 hover:text-white"
+              title="Read aloud"
+            >
+              <Volume2 className="w-4 h-4" />
+            </button>
+          </div>
+
+          {msg.sender === 'agent' && (
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={() => handleFeedback(activeAgent.id, msg.id, "up")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all text-[11px] font-bold tracking-wider ${msg.feedback === 'up' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'hover:bg-white/10 border-white/5 text-gray-500 hover:text-emerald-500 hover:border-emerald-500/30'}`}
+              >
+                <ThumbsUp className="w-3.5 h-3.5" />
+                <span>HELPFUL</span>
+              </button>
+              <button
+                onClick={() => handleFeedback(activeAgent.id, msg.id, "down")}
+                className={`p-1.5 rounded-lg border transition-all ${msg.feedback === 'down' ? 'bg-red-500/20 border-red-500/40 text-red-400' : 'hover:bg-white/10 border-white/5 text-gray-500 hover:text-red-500 hover:border-red-500/30'}`}
+              >
+                <ThumbsDown className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}, (prev, next) => {
+  return prev.msg.text === next.msg.text &&
+    prev.msg.feedback === next.msg.feedback &&
+    prev.msg.attachment?.url === next.msg.attachment?.url &&
+    prev.msg.linkChips?.length === next.msg.linkChips?.length &&
+    prev.copiedId === next.copiedId &&
+    prev.activeAgent?.id === next.activeAgent?.id;
+});
+MemoizedChatMessage.displayName = "MemoizedChatMessage";
+
+const StarField = React.memo(({ stars }: { stars: any[] }) => (
+  <div className="absolute inset-0 z-0 pointer-events-none hardware-accelerated" style={{ contain: 'strict' }}>
+    {stars.map(star => (
+      <div
+        key={star.id}
+        className="absolute rounded-full bg-white hardware-accelerated"
+        style={{
+          left: `${star.x}%`,
+          top: `${star.y}%`,
+          width: star.size,
+          height: star.size,
+          opacity: star.twinkle ? undefined : star.opacity,
+          backfaceVisibility: 'hidden',
+          WebkitBackfaceVisibility: 'hidden',
+          transform: 'translateZ(0)',
+          willChange: star.twinkle ? 'opacity' : 'transform',
+          animation: star.twinkle
+            ? `twinkle ${star.duration}s ease-in-out infinite ${star.delay}s`
+            : undefined
+        }}
+      />
+    ))}
+  </div>
+));
+StarField.displayName = "StarField";
+
+const SolarSystem = React.memo(({
+  activeAgentId,
+  onPlanetClick,
+  triggerRipple,
+  planetRefs,
+  hasActiveAgent
+}: {
+  activeAgentId: string | null,
+  onPlanetClick: (p: any) => void,
+  triggerRipple: (e: any, c: string) => void,
+  planetRefs: React.MutableRefObject<any>,
+  hasActiveAgent: boolean
+}) => (
+  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+    <div className="relative w-full h-full flex items-center justify-center">
+      {/* THE SUN / CORE */}
+      <motion.div
+        className="absolute z-20 w-32 h-32 rounded-full cursor-pointer pointer-events-auto hardware-accelerated"
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        style={{
+          background: "radial-gradient(circle, #fff 0%, #fff 20%, #444 60%, transparent 100%)",
+          boxShadow: "0 0 100px rgba(255,255,255,0.4), inset 0 0 40px rgba(255,255,255,0.6)",
+          animation: 'pulseGlow 3s ease-in-out infinite',
+          willChange: 'transform, opacity'
+        }}
+      />
+
+      {/* ORBITS & PLANETS */}
+      {PLANETS.map((planet, index) => {
+        const isActive = activeAgentId === planet.id;
+        return (
+          <div key={planet.id}>
+            {/* Orbit paths */}
+            <div
+              className="orbit-container hardware-accelerated"
+              style={{ width: planet.radius * 2, height: planet.radius * 2 }}
+            />
+
+            {/* The Planet Orb */}
+            <motion.div
+              ref={(el: HTMLDivElement | null) => {
+                planetRefs.current[planet.id] = el;
+              }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="planet-wrapper hardware-accelerated"
+              onClick={(e) => { triggerRipple(e, planet.color); onPlanetClick(planet); }}
+              style={{
+                '--orbit-radius': `${planet.radius}px`,
+                animationName: 'orbit',
+                animationDuration: `${planet.speed}s`,
+                animationTimingFunction: 'linear',
+                animationIterationCount: 'infinite',
+                animationDelay: `-${index * 4}s`,
+                backgroundColor: isActive ? `${planet.color}40` : `${planet.color}26`,
+                border: `2px solid ${planet.color}`,
+                boxShadow: isActive ? `0 0 60px ${planet.color}, inset 0 0 20px ${planet.color}` : 'none',
+                animationPlayState: hasActiveAgent ? 'paused' : 'running',
+                zIndex: isActive ? 100 : 10,
+                ...(isActive ? {
+                  transform: 'translate(-50%, -50%) translateZ(0) !important',
+                  left: '50%', top: '50%', margin: 0,
+                  animationName: 'pulseGlow',
+                  animationDuration: '3s',
+                  animationTimingFunction: 'ease-in-out'
+                } : {})
+              } as React.CSSProperties}
+              title={planet.name}
+            >
+              <planet.icon className="w-5 h-5 transition-all duration-300" style={{ color: planet.color }} />
+              <div className="planet-label font-orbitron font-bold">{planet.name}</div>
+            </motion.div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+));
+SolarSystem.displayName = "SolarSystem";
+
+type Message = {
+  id: string;
+  sender: "user" | "agent";
+  text: string;
+  attachment?: {
+    name: string;
+    type: string;
+    url: string;
+  };
+  feedback?: "up" | "down";
+  linkChips?: { label: string; url: string }[];
+};
+type ChatHistory = Map<string, Message[]>;
+
+class UISounds {
+  static ctx: AudioContext | null = null;
+  static init() {
+    if (typeof window === 'undefined') return;
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) this.ctx = new AudioCtx();
+    }
+  }
+
+  static playClick(soundOn: boolean) {
+    if (!soundOn) return;
+    this.init();
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(300, this.ctx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.1);
+  }
+
+  static playSend(soundOn: boolean) {
+    if (!soundOn) return;
+    this.init();
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.2);
+  }
+
+  static playComplete(soundOn: boolean) {
+    if (!soundOn) return;
+    this.init();
+    if (!this.ctx) return;
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc1.type = 'sine';
+    osc2.type = 'sine';
+    osc1.frequency.setValueAtTime(523.25, this.ctx.currentTime);
+    osc2.frequency.setValueAtTime(659.25, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.1, this.ctx.currentTime + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 1.2);
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc1.start(); osc2.start();
+    osc1.stop(this.ctx.currentTime + 1.2); osc2.stop(this.ctx.currentTime + 1.2);
+  }
+}
+
+export default function ARIAInterface() {
+  const [activeAgent, setActiveAgent] = useState<typeof PLANETS[0] | null>(null);
+  const [chatHistories, setChatHistories] = useState<ChatHistory>(new Map());
+  const [inputValue, setInputValue] = useState("");
+  const [isInputFocused, setIsInputFocused] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isWebcamActive, setIsWebcamActive] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [rpmData, setRpmData] = useState({ rpm: 0, intensity: 0, limit: 15 });
+  const [userEmotion, setUserEmotion] = useState("CALM");
+  const [isEngineOnline, setIsEngineOnline] = useState<boolean | null>(null);
+
+  // Feature states
+  const [ripples, setRipples] = useState<{ id: number; x: number; y: number; color: string }[]>([]);
+  const [showPalette, setShowPalette] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [soundOn, setSoundOn] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [theme, setTheme] = useState<'space' | 'void' | 'aurora'>('space');
+  const [latency, setLatency] = useState(0);
+  const [totalMessages, setTotalMessages] = useState(0);
+  const [beam, setBeam] = useState<{ startX: number; startY: number; endX: number; endY: number; color: string } | null>(null);
+  const [isSupernova, setIsSupernova] = useState(false);
+
+  const planetRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const droneSrcRef = useRef<OscillatorNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const prevStreamingRef = useRef(false);
+
+  useEffect(() => {
+    if (isStreaming && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatHistories, isStreaming]);
+
+  useEffect(() => {
+    if (prevStreamingRef.current && !isStreaming) {
+      UISounds.playComplete(soundOn);
+    }
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming, soundOn]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+
+      recognitionRef.current.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setInputValue((prev) => prev ? prev + " " + transcript : transcript);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error("Speech recognition error", event.error);
+        setIsRecording(false);
+      };
+    }
+  }, []);
+
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
+        setIsRecording(true);
+      } else {
+        alert("Speech recognition is not supported in your browser.");
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleSpeak = (text: string) => {
+    if ('speechSynthesis' in window) {
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  const handleFeedback = async (navId: string, msgId: string, rating: "up" | "down") => {
+    // Update UI immediately
+    setChatHistories(prev => {
+      const newMap = new Map(prev);
+      const history = (newMap.get(navId) || []).map(m =>
+        m.id === msgId ? { ...m, feedback: rating } : m
+      );
+      newMap.set(navId, history);
+      return newMap;
+    });
+
+    try {
+      await fetch(`http://127.0.0.1:8080/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: navId,
+          message_id: msgId,
+          rating: rating
+        })
+      });
+    } catch (err) {
+      console.error("Feedback error", err);
+    }
+  };
+
+  const resetChat = async (agentId: string) => {
+    setIsSupernova(true);
+    UISounds.playSend(soundOn); // We can reuse the send sound for the suck-in effect
+
+    setTimeout(async () => {
+      try {
+        await fetch(`http://127.0.0.1:8080/chat/session/${agentId}`, {
+          method: "DELETE",
+        });
+        setChatHistories(prev => {
+          const newMap = new Map(prev);
+          newMap.set(agentId, [
+            {
+              id: Date.now().toString(),
+              sender: "agent",
+              text: `Conversation reset. How can I help you now?`
+            }
+          ]);
+          return newMap;
+        });
+      } catch (err) {
+        console.error("Error resetting chat:", err);
+      }
+      setIsSupernova(false);
+    }, 800);
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const startWebcam = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      streamRef.current = stream;
+      setIsWebcamActive(true);
+    } catch (err) {
+      console.error("Error accessing webcam:", err);
+      alert("Could not access camera. Please check permissions.");
+    }
+  };
+
+  useEffect(() => {
+    if (isWebcamActive && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [isWebcamActive]);
+
+  const stopWebcam = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsWebcamActive(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement("canvas");
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], `capture_${Date.now()}.png`, { type: "image/png" });
+            setSelectedFile(file);
+            stopWebcam();
+          }
+        }, "image/png");
+      }
+    }
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistories, activeAgent]);
+
+  useEffect(() => {
+    const fetchRPM = async () => {
+      // Use current window location to avoid hardcoded 127.0.0.1/localhost mismatch
+      const host = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+      const urls = [
+        `http://${host}:8080/usage`,
+        `http://127.0.0.1:8080/usage`,
+        `http://localhost:8080/usage`
+      ];
+      let success = false;
+      
+      for (const url of urls) {
+        try {
+          // Use AbortController for strict 10s timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+          const res = await (window.fetch || fetch)(url, { 
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            mode: 'cors',
+            cache: 'no-cache',
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const data = await res.json();
+            setRpmData(data);
+            setIsEngineOnline(true);
+            success = true;
+            break;
+          }
+        } catch (err: any) {
+          // Only log real errors, ignore aborted requests to keep console clean
+          if (err.name !== 'AbortError') {
+            console.error(`[Network Diagnostic] Failed to reach ${url}:`, err.name, err.message);
+          }
+        }
+        // Small delay between trying different URLs to allow network to breathe
+        await new Promise(r => setTimeout(r, 100));
+      }
+      
+      if (!success) {
+        setIsEngineOnline(false);
+      }
+    };
+    fetchRPM();
+    const interval = setInterval(fetchRPM, 2000); // 2s interval for real-time accuracy
+    return () => clearInterval(interval);
+  }, []);
+
+  const stars = useMemo(() => {
+    return Array.from({ length: 50 }).map((_, i) => ({
+      id: i,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: Math.random() * 2 + 0.5,
+      twinkle: Math.random() > 0.7,
+      duration: Math.random() * 3 + 2,
+      delay: Math.random() * 2,
+      opacity: Math.random() * 0.5 + 0.3
+    }));
+  }, []);
+
+  const [mountedStars, setMountedStars] = useState<typeof stars>([]);
+  useEffect(() => setMountedStars(stars), [stars]);
+
+  // Command Palette keyboard shortcut
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '/' && !e.ctrlKey && !e.metaKey && !(e.target as HTMLElement).closest('input,textarea')) {
+        e.preventDefault();
+        setShowPalette(p => !p);
+        setPaletteQuery("");
+      }
+      if (e.key === 'Escape') setShowPalette(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Ambient sound toggle
+  const toggleSound = useCallback(() => {
+    if (soundOn) {
+      gainRef.current?.gain.setTargetAtTime(0, audioCtxRef.current!.currentTime, 0.5);
+      setTimeout(() => { droneSrcRef.current?.stop(); droneSrcRef.current = null; }, 600);
+      setSoundOn(false);
+    } else {
+      const ctx = audioCtxRef.current || new AudioContext();
+      audioCtxRef.current = ctx;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.setTargetAtTime(0.06, ctx.currentTime, 1.5);
+      gain.connect(ctx.destination);
+      gainRef.current = gain;
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(55, ctx.currentTime);
+      osc.connect(gain);
+      osc.start();
+      droneSrcRef.current = osc;
+      // Add slight frequency wobble for space feel
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.value = 0.08;
+      lfoGain.gain.value = 3;
+      lfo.connect(lfoGain);
+      lfoGain.connect(osc.frequency);
+      lfo.start();
+      setSoundOn(true);
+    }
+  }, [soundOn]);
+
+  // Theme background map
+  const themeMap = {
+    space: { bg: '#03050a', nebula: 'rgba(12,20,50,0.7)', accent: '#06b6d4' },
+    void: { bg: '#000000', nebula: 'rgba(15,15,15,0.85)', accent: '#8b5cf6' },
+    aurora: { bg: '#010805', nebula: 'rgba(0,35,15,0.75)', accent: '#10b981' },
+  };
+  const currentTheme = themeMap[theme];
+  const themes: Array<'space' | 'void' | 'aurora'> = ['space', 'void', 'aurora'];
+  const themeLabels = { space: '🌌 Quantum Space', void: '🌑 Obsidian Void', aurora: '🌿 Neon Aurora' };
+
+  // Ripple on planet click
+  const triggerRipple = (e: React.MouseEvent, color: string) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const rid = Date.now();
+    setRipples(prev => [...prev, { id: rid, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, color }]);
+    setTimeout(() => setRipples(prev => prev.filter(r => r.id !== rid)), 900);
+  };
+
+  const filteredPlanets = PLANETS.filter(p =>
+    p.name.toLowerCase().includes(paletteQuery.toLowerCase())
+  );
+
+  const handlePlanetClick = (planet: typeof PLANETS[0]) => {
+    UISounds.playClick(soundOn);
+    setActiveAgent(planet);
+    setChatHistories(prev => {
+      const newMap = new Map(prev);
+      if (!newMap.has(planet.id)) {
+        newMap.set(planet.id, [
+          {
+            id: Date.now().toString(),
+            sender: "agent",
+            text: `Hello! I'm ${planet.name}. How can I help you today?`
+          }
+        ]);
+      }
+      return newMap;
+    });
+  };
+
+  const closeChat = () => {
+    setActiveAgent(null);
+  };
+
+  const triggerHandoff = (sourceId: string, targetId: string) => {
+    const sourceEl = planetRefs.current[sourceId];
+    const targetEl = planetRefs.current[targetId];
+
+    if (sourceEl && targetEl) {
+      const sourceRect = sourceEl.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+
+      setBeam({
+        startX: sourceRect.left + sourceRect.width / 2,
+        startY: sourceRect.top + sourceRect.height / 2,
+        endX: targetRect.left + targetRect.width / 2,
+        endY: targetRect.top + targetRect.height / 2,
+        color: PLANETS.find(p => p.id === sourceId)?.color || '#fff'
+      });
+
+      UISounds.playSend(soundOn);
+
+      setTimeout(() => {
+        setBeam(null);
+        const targetPlanet = PLANETS.find(p => p.id === targetId);
+        if (targetPlanet) handlePlanetClick(targetPlanet);
+      }, 1000);
+    } else {
+      const targetPlanet = PLANETS.find(p => p.id === targetId);
+      if (targetPlanet) handlePlanetClick(targetPlanet);
+    }
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent, messageOverride?: string) => {
+    if (e) e.preventDefault();
+    const messageText = (messageOverride !== undefined ? messageOverride : inputValue).trim();
+    if (!messageText && !selectedFile || !activeAgent) return;
+
+    if (messageText.startsWith('/switch ')) {
+      const targetName = messageText.replace('/switch ', '').trim().toLowerCase();
+      const targetPlanet = PLANETS.find(p => p.name.toLowerCase().includes(targetName) || p.id === targetName);
+      if (targetPlanet && targetPlanet.id !== activeAgent.id) {
+        triggerHandoff(activeAgent.id, targetPlanet.id);
+        setInputValue("");
+        return;
+      }
+    }
+
+    UISounds.playSend(soundOn);
+
+    const navId = activeAgent.id;
+
+    let attachmentData = undefined;
+    if (selectedFile) {
+      attachmentData = {
+        name: selectedFile.name,
+        type: selectedFile.type,
+        url: URL.createObjectURL(selectedFile)
+      };
+    }
+
+    // No longer need const messageText = inputValue.trim(); here
+    const userMsg: Message = {
+      id: Date.now().toString() + "_u",
+      sender: "user",
+      text: messageText,
+      attachment: attachmentData
+    };
+
+    // Create pending agent message
+    const agentMsgId = Date.now().toString() + "_a";
+    const agentMsg: Message = { id: agentMsgId, sender: "agent", text: "🧠 Thinking..." };
+
+    setChatHistories(prev => {
+      const newMap = new Map(prev);
+      const current = newMap.get(navId) || [];
+      newMap.set(navId, [...current, userMsg, agentMsg]);
+      return newMap;
+    });
+    setInputValue("");
+    setSelectedFile(null);
+    setIsStreaming(true);
+    const t0 = Date.now();
+
+    // Dynamic Emotion Analysis
+    analyzeEmotion(messageText).then(emotion => setUserEmotion(emotion));
+
+    try {
+      const payload: any = {
+        message: messageText,
+        session_id: navId,
+        mode: activeAgent.name
+      };
+
+      if (selectedFile) {
+        const b64 = await fileToBase64(selectedFile);
+        if (selectedFile.type.startsWith("image/")) {
+          payload.image_base64 = b64;
+        } else {
+          payload.document_base64 = b64;
+          payload.file_name = selectedFile.name;
+        }
+      }
+
+      let res = null;
+      const streamUrls = ["http://127.0.0.1:8080/chat/stream", "http://localhost:8080/chat/stream"];
+      
+      // 30-second timeout — prevents infinite "Thinking..." when backend hangs
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      for (const url of streamUrls) {
+        try {
+          const attempt = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          });
+          if (attempt.ok) {
+            res = attempt;
+            break;
+          }
+        } catch (err: any) {
+          if (err.name === "AbortError") {
+            throw new Error("⏱️ Request timed out after 30 seconds. The AI may be overloaded — please try again.");
+          }
+          console.error(`[Stream Diagnostic] Failed to reach ${url}:`, err);
+        }
+      }
+      clearTimeout(timeoutId);
+
+      if (!res || !res.ok) {
+        const errData = res ? await res.json().catch(() => ({})) : {};
+        throw new Error(errData.detail || "ARIA Engine is offline or unreachable.");
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      if (!reader) return;
+
+      let accumulatedText = "";
+      let buffer = "";
+
+      const updateUI = (text: string, isFinal = false) => {
+        setChatHistories(prev => {
+          const newMap = new Map(prev);
+          const current = [...(newMap.get(navId) || [])];
+          const msgIndex = current.findIndex(m => m.id === agentMsgId);
+          if (msgIndex !== -1) {
+            current[msgIndex] = { ...current[msgIndex], text };
+            newMap.set(navId, current);
+          }
+          return newMap;
+        });
+      };
+
+      let streamComplete = false;
+
+      while (!streamComplete) {
+        const { done, value } = await reader.read();
+        if (done) {
+          updateUI(accumulatedText, true);
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(trimmedLine.slice(6));
+
+            if (data.type === "text") {
+              accumulatedText = data.text;
+              updateUI(accumulatedText);
+            } else if (data.type === "status") {
+              // Only show status text if no real AI text has arrived yet
+              const isPlaceholder = !accumulatedText
+                || accumulatedText.includes("Processing")
+                || accumulatedText.includes("Thinking")
+                || accumulatedText.includes("Running")
+                || accumulatedText.includes("Synthesizing")
+                || accumulatedText.includes("🧠")
+                || accumulatedText.includes("⚙️");
+              if (isPlaceholder) {
+                accumulatedText = data.text;
+                updateUI(accumulatedText);
+              }
+            } else if (data.type === "tool_start") {
+              accumulatedText = `Running ${data.name}...`;
+              updateUI(accumulatedText);
+            } else if (data.type === "tool_done") {
+              if (accumulatedText.includes("Running") || accumulatedText.includes("⚙️")) {
+                accumulatedText = "Synthesizing Results...";
+                updateUI(accumulatedText);
+              }
+            } else if (data.type === "done") {
+              // Properly exit both loops using the flag
+              updateUI(accumulatedText || "", true);
+              setIsStreaming(false);
+              streamComplete = true;
+              break; // exits for loop; while condition (!streamComplete) exits outer loop
+            } else if (data.type === "error") {
+              accumulatedText = `❌ Error: ${data.text}`;
+              updateUI(accumulatedText, true);
+              setIsStreaming(false);
+              streamComplete = true;
+              break;
+            } else if (data.type === "open_urls" || data.type === "map_url") {
+              const urls: string[] = data.urls || [data.url];
+              
+              // Attempt direct open (Note: Browsers might block this if not triggered directly by click)
+              urls.forEach(url => {
+                try {
+                  window.open(url, '_blank', 'noopener,noreferrer');
+                } catch (e) {
+                  console.warn("Direct window.open blocked by browser:", e);
+                }
+              });
+
+              const chips = urls.map((url: string) => ({
+                label: url.replace(/^https?:\/\//, "").split("/")[0],
+                url
+              }));
+              setChatHistories(prev => {
+                const newMap = new Map(prev);
+                const current = [...(newMap.get(navId) || [])];
+                const msgIndex = current.findIndex(m => m.id === agentMsgId);
+                if (msgIndex !== -1) {
+                  const existing = current[msgIndex].linkChips || [];
+                  current[msgIndex] = { ...current[msgIndex], linkChips: [...existing, ...chips] };
+                  newMap.set(navId, current);
+                }
+                return newMap;
+              });
+            }
+          } catch (e) {
+            console.error("SSE Parse Error:", e, "Line:", trimmedLine);
+          }
+        }
+      }
+      setIsStreaming(false);
+      const t1 = Date.now();
+      // Only record latency if it was a real request, not just starting tools
+      if (t1 - t0 > 2000) {
+        setLatency(t1 - t0);
+        setTotalMessages(prev => prev + 1);
+      }
+    } catch (err: any) {
+      console.error("[Network Check] Fetch failed:", err);
+      const isQuotaError = err.message?.includes("429") || err.message?.includes("RESOURCE_EXHAUSTED");
+      const isNetworkError = err.message?.toLowerCase().includes("network error") || err.message?.toLowerCase().includes("failed to fetch");
+      
+      let errorText = `Error: ${err.message || "Connection failed"}`;
+      if (isQuotaError) errorText = "⚠️ ARIA Quota Exceeded. Please wait a minute while I recharge...";
+      if (isNetworkError) errorText = "🌐 Network Error: The ARIA Engine is unreachable. Please ensure 'run_backend.bat' is active at 127.0.0.1:8080.";
+
+      setChatHistories(prev => {
+        const newMap = new Map(prev);
+        const current = [...(newMap.get(navId) || [])];
+        const msgIndex = current.findIndex(m => m.id === agentMsgId);
+        if (msgIndex !== -1) {
+          current[msgIndex] = { ...current[msgIndex], text: errorText };
+          newMap.set(navId, current);
+        }
+        return newMap;
+      });
+      setIsStreaming(false);
+    }
+  };
+
+  const activeMessages = activeAgent ? (chatHistories.get(activeAgent.id) || []) : [];
+
+  return (
+    <div className="fixed inset-0 overflow-hidden text-gray-200 font-sans selection:bg-cyan-900 transition-colors duration-1000" style={{ backgroundColor: currentTheme.bg }}>
+
+
+      <style dangerouslySetInnerHTML={{
+        __html: `
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@500;700;900&display=swap');
+
+        .font-orbitron { font-family: 'Orbitron', sans-serif; }
+        .font-inter { font-family: 'Inter', sans-serif; }
+
+        @keyframes orbit {
+          from { transform: rotate(0deg) translateX(var(--orbit-radius)) rotate(0deg) translateZ(0); }
+          to { transform: rotate(360deg) translateX(var(--orbit-radius)) rotate(-360deg) translateZ(0); }
+        }
+
+        @keyframes pulseGlow {
+          0%, 100% { opacity: 0.6; }
+          50% { opacity: 1; }
+        }
+
+        .hardware-accelerated {
+          transform: translateZ(0);
+          backface-visibility: hidden;
+          perspective: 1000px;
+          will-change: transform, opacity;
+        }
+
+        .will-change-transform {
+          will-change: transform;
+        }
+
+        @keyframes twinkle {
+          0%, 100% { opacity: 0.2; }
+          50% { opacity: 1; }
+        }
+
+        @keyframes slideInRight {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+
+        @keyframes messageFadeIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .orbit-container {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          border-radius: 50%;
+          border: 1px dashed rgba(255,255,255,0.08);
+          pointer-events: none;
+        }
+
+        .planet-wrapper {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          margin-top: -21px;
+          margin-left: -21px;
+          width: 42px;
+          height: 42px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          pointer-events: auto;
+          animation: orbit linear infinite;
+          will-change: transform;
+          backface-visibility: hidden;
+          transition: box-shadow 0.3s cubic-bezier(0.34,1.56,0.64,1), border-color 0.3s ease, background-color 0.3s ease;
+        }
+
+        .planet-wrapper:hover {
+          animation-play-state: paused;
+          z-index: 50;
+          background: rgba(255, 255, 255, 0.1) !important;
+          border-color: white !important;
+        }
+
+        .planet-wrapper:hover svg {
+          transform: scale(1.3);
+        }
+
+        .planet-label {
+          position: absolute;
+          top: 50px;
+          left: 50%;
+          transform: translateX(-50%);
+          font-size: 10px;
+          color: rgba(255,255,255,0.6);
+          white-space: nowrap;
+          text-transform: uppercase;
+          letter-spacing: 0.15em;
+          opacity: 0;
+          transition: opacity 0.2s;
+          pointer-events: none;
+        }
+
+        .planet-wrapper:hover .planet-label {
+          opacity: 1;
+        }
+
+        .chat-panel {
+          animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        .chat-message {
+          animation: messageFadeIn 0.25s ease-out forwards;
+        }
+
+        .nebula-glow {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 120vw;
+          height: 120vh;
+          transform: translate(-50%, -50%);
+          pointer-events: none;
+          z-index: 0;
+          animation: nebulaPulse 30s ease-in-out infinite;
+        }
+
+        @keyframes nebulaPulse {
+          0%   { background: radial-gradient(circle at 40% 50%, rgba(16,25,60,0.7) 0%, rgba(5,8,16,0) 60%); }
+          33%  { background: radial-gradient(circle at 60% 50%, rgba(50,10,70,0.6) 0%, rgba(5,8,16,0) 60%); }
+          66%  { background: radial-gradient(circle at 50% 60%, rgba(0,50,45,0.6) 0%, rgba(5,8,16,0) 60%); }
+          100% { background: radial-gradient(circle at 40% 50%, rgba(16,25,60,0.7) 0%, rgba(5,8,16,0) 60%); }
+        }
+
+        @keyframes rippleOut {
+          0%   { transform: translate(-50%,-50%) scale(0.2); opacity: 0.9; }
+          100% { transform: translate(-50%,-50%) scale(8);   opacity: 0; }
+        }
+
+        @keyframes glowRing {
+          0%, 100% { opacity: 0.5; transform: translate(-50%,-50%) scale(1); }
+          50%       { opacity: 1;   transform: translate(-50%,-50%) scale(1.15); }
+        }
+
+        @keyframes dotPulse {
+          0%, 80%, 100% { transform: scale(0.55); opacity: 0.35; }
+          40%            { transform: scale(1);    opacity: 1; }
+        }
+      `}} />
+
+      {/* BACKGROUND */}
+      <div className="nebula-glow" />
+      <div className="absolute inset-0 z-0 pointer-events-none hardware-accelerated" style={{ contain: 'strict' }}>
+         <MemoizedStars stars={mountedStars} />
+      </div>
+
+      {/* RIPPLE LAYER */}
+      {ripples.map(r => (
+        <div
+          key={r.id}
+          className="fixed pointer-events-none z-[100] rounded-full border-2"
+          style={{
+            left: r.x, top: r.y,
+            width: 60, height: 60,
+            borderColor: r.color,
+            animation: 'rippleOut 0.9s cubic-bezier(0.2,0.6,0.4,1) forwards',
+          }}
+        />
+      ))}
+
+      {/* TOP NAVIGATION */}
+      <div className="absolute top-0 left-0 w-full h-[52px] bg-black/60 backdrop-blur-md z-40 border-b border-white/5 grid grid-cols-3 items-center px-6">
+        {/* LEFT: STATUS & RPM */}
+        <div className="flex items-center justify-start gap-4">
+          <div className="bg-cyan-500/10 border border-cyan-500/20 rounded px-2 py-1 flex items-center gap-2 shadow-[0_0_15px_rgba(6,182,212,0.1)]">
+            <div className={`w-1.5 h-1.5 rounded-full ${rpmData.rpm > 12 ? 'bg-red-400 animate-pulse' : 'bg-cyan-400'}`} />
+            <span className="text-[11px] font-orbitron font-bold text-cyan-300 tracking-wider">
+              {rpmData.rpm}/{rpmData.limit} <span className="text-[9px] text-cyan-500/50">RPM</span>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 px-2 py-1 bg-white/5 border border-white/10 rounded backdrop-blur-sm">
+            <div className={`w-1.5 h-1.5 rounded-full ${isEngineOnline === true ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : isEngineOnline === false ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-gray-500'} transition-all duration-300`} />
+            <span className="text-[10px] uppercase tracking-widest font-bold text-white/60">
+              {isEngineOnline === true ? 'Engine: Online' : isEngineOnline === false ? 'Engine: Offline' : 'Connecting...'}
+            </span>
+          </div>
+        </div>
+
+        {/* MIDDLE: ARIA BRANDING */}
+        <div className="flex flex-col items-center justify-center">
+          <div className="flex items-center gap-3">
+            <Hexagon className="text-cyan-400 w-5 h-5" />
+            <span className="font-orbitron font-bold tracking-[0.2em] text-cyan-400 text-lg">ARIA</span>
+          </div>
+          <span className="text-[8px] uppercase tracking-[0.3em] text-gray-500 leading-none mt-0.5 font-medium">Advanced Reasoning Intelligence</span>
+        </div>
+
+        {/* RIGHT: STATUS INDICATORS */}
+        <div className="flex items-center justify-end gap-4">
+          <div className="flex items-center gap-2 text-[11px] font-medium text-gray-400">
+            {(() => {
+              const mapping: Record<string, { label: string; icon: any; color: string }> = {
+                "HAPPY": { label: "Happy", icon: Smile, color: "text-emerald-400" },
+                "SAD": { label: "Sad", icon: Frown, color: "text-blue-400" },
+                "ANGRY": { label: "Angry", icon: Angry, color: "text-red-500" },
+                "FEAR": { label: "Fear", icon: AlertCircle, color: "text-purple-400" },
+                "NERVOUS": { label: "Nervous", icon: Brain, color: "text-orange-400" },
+                "CALM": { label: "Calm", icon: Wind, color: "text-cyan-400" },
+                "EXCITED": { label: "Excited", icon: Zap, color: "text-yellow-400" },
+                "EXHAUSTED": { label: "Exhausted", icon: CloudRain, color: "text-gray-400" }
+              };
+              const current = mapping[userEmotion] || mapping["CALM"];
+              const Icon = current.icon;
+              return (
+                <div className="flex items-center gap-2">
+                  <Icon className={`w-3.5 h-3.5 ${current.color}`} />
+                  <span>{current.label}</span>
+                </div>
+              );
+            })()}
+          </div>
+          <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full text-[10px] font-bold border border-emerald-500/20 tracking-widest leading-none">
+            <div className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+            LIVE
+          </div>
+          {/* Sound toggle */}
+          <button
+            onClick={toggleSound}
+            title={soundOn ? 'Mute Ambient' : 'Ambient Sound'}
+            className={`p-1.5 rounded-lg border transition-all text-xs ${soundOn ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300' : 'bg-white/5 border-white/10 text-gray-500 hover:text-white hover:bg-white/10'}`}
+          >
+            <Music className="w-3.5 h-3.5" />
+          </button>
+          {/* Stats toggle */}
+          <button
+            onClick={() => setShowStats(s => !s)}
+            title="System Stats"
+            className={`p-1.5 rounded-lg border transition-all text-xs ${showStats ? 'bg-purple-500/20 border-purple-500/40 text-purple-300' : 'bg-white/5 border-white/10 text-gray-500 hover:text-white hover:bg-white/10'}`}
+          >
+            <BarChart2 className="w-3.5 h-3.5" />
+          </button>
+          {/* Theme cycler */}
+          <button
+            onClick={() => setTheme(t => themes[(themes.indexOf(t) + 1) % themes.length])}
+            title={themeLabels[theme]}
+            className="p-1.5 rounded-lg border bg-white/5 border-white/10 text-gray-500 hover:text-white hover:bg-white/10 transition-all text-xs"
+          >
+            <Palette className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="relative w-full h-full flex">
+
+        {/* PANEL 1: SOLAR SYSTEM */}
+        <motion.div
+          animate={{ x: activeAgent ? '-20%' : '0%' }}
+          transition={{ type: "spring", stiffness: 80, damping: 20, mass: 1 }}
+          className="relative h-full w-full flex items-center justify-center font-inter"
+        >
+          <div
+            className="relative w-full h-full flex items-center justify-center scale-[0.5] sm:scale-[0.6] md:scale-[0.7] lg:scale-[0.8] xl:scale-[0.85]"
+            style={{
+              transform: undefined,
+              perspective: '1200px',
+              backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
+            }}
+          >
+            {/* Stars are already absolute children of the root */}
+
+            {/* THE SUN */}
+            <div
+              className="absolute top-1/2 left-1/2 z-30 cursor-pointer"
+              style={{ transform: 'translate(-50%, -50%)', animation: 'pulseGlow 3s ease-in-out infinite' }}
+              onClick={() => handlePlanetClick(PLANETS[1])}
+            >
+              <div className="w-[90px] h-[90px] rounded-full flex items-center justify-center relative">
+                <div className="absolute inset-0 rounded-full bg-cyan-400/20 blur-xl" />
+                <div className="absolute inset-0 rounded-full bg-cyan-300/40 blur-md" />
+                <div className="absolute inset-2 rounded-full bg-cyan-100 shadow-[0_0_20px_#00e5ff_inset]" />
+                <Hexagon className="w-10 h-10 text-cyan-900 absolute z-10" />
+              </div>
+              <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 font-orbitron font-bold text-cyan-400 tracking-[0.2em] text-sm">
+                ARIA
+              </div>
+            </div>
+
+            {/* THE PLANETS */}
+            <AnimatePresence>
+              {PLANETS.map((planet, index) => {
+                const isActive = activeAgent?.id === planet.id;
+                const isHidden = activeAgent && !isActive;
+
+                return (
+                  <React.Fragment key={planet.id}>
+                    {/* Orbit Ring - Hidden when an agent is active */}
+                    <AnimatePresence>
+                      {!activeAgent && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="orbit-container"
+                          style={{ width: planet.radius * 2, height: planet.radius * 2 }}
+                        />
+                      )}
+                    </AnimatePresence>
+
+                    {/* The Planet Orb */}
+                    <motion.div
+                      ref={(el) => {
+                        planetRefs.current[planet.id] = el;
+                      }}
+                      initial={{ opacity: 1, scale: 1 }}
+                      animate={{
+                        opacity: isHidden ? 0 : 1,
+                        scale: isActive ? 2.5 : 1,
+                        x: isActive ? 0 : undefined,
+                        y: isActive ? 0 : undefined,
+                      }}
+                      transition={{ type: "spring", stiffness: 100, damping: 15 }}
+                      className="planet-wrapper group"
+                      onClick={(e) => { triggerRipple(e, planet.color); handlePlanetClick(planet); }}
+                      style={{
+                        '--orbit-radius': `${planet.radius}px`,
+                        animationName: 'orbit',
+                        animationDuration: `${planet.speed}s`,
+                        animationTimingFunction: 'linear',
+                        animationIterationCount: 'infinite',
+                        animationDelay: `-${index * 4}s`,
+                        backgroundColor: isActive ? `${planet.color}40` : `${planet.color}26`,
+                        border: `2px solid ${planet.color}`,
+                        boxShadow: isActive ? `0 0 60px ${planet.color}, inset 0 0 20px ${planet.color}` : 'none',
+                        animationPlayState: activeAgent ? 'paused' : 'running',
+                        zIndex: isActive ? 100 : 10,
+                        ...(isActive ? {
+                          transform: 'translate(-50%, -50%) translateZ(0) !important',
+                          left: '50%', top: '50%', margin: 0
+                        } : {})
+                      } as React.CSSProperties}
+                      title={planet.name}
+                    >
+                      <planet.icon className="w-[18px] h-[18px]" style={{ color: planet.color, filter: isActive ? `drop-shadow(0 0 5px ${planet.color})` : 'none' }} />
+
+                      {/* Name Label */}
+                      <div
+                        className={`absolute -bottom-8 whitespace-nowrap font-orbitron font-bold text-[10px] tracking-wider transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                        style={{ color: planet.color }}
+                      >
+                        {planet.name}
+                      </div>
+
+                      {/* Particle Emitters for Active State */}
+                      <AnimatePresence>
+                        {isActive && isStreaming && (
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute inset-0 rounded-full"
+                          >
+                            {Array.from({ length: 8 }).map((_, i) => (
+                              <motion.div
+                                key={i}
+                                className="absolute w-1.5 h-1.5 rounded-full"
+                                style={{ backgroundColor: planet.color, top: '50%', left: '50%' }}
+                                animate={{
+                                  x: [0, (Math.random() - 0.5) * 150],
+                                  y: [0, (Math.random() - 0.5) * 150],
+                                  opacity: [1, 0],
+                                  scale: [1, 0]
+                                }}
+                                transition={{
+                                  duration: Math.random() * 1.5 + 0.5,
+                                  repeat: Infinity,
+                                  ease: "easeOut",
+                                  delay: Math.random()
+                                }}
+                              />
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  </React.Fragment>
+                );
+              })}
+            </AnimatePresence>
+
+            {/* SVG BEAM OVERLAY */}
+            <AnimatePresence>
+              {beam && (
+                <motion.svg
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 pointer-events-none z-[150]"
+                  style={{ width: '100vw', height: '100vh' }}
+                >
+                  <motion.line
+                    x1={beam.startX}
+                    y1={beam.startY}
+                    x2={beam.endX}
+                    y2={beam.endY}
+                    stroke={beam.color}
+                    strokeWidth="4"
+                    strokeLinecap="round"
+                    initial={{ pathLength: 0, opacity: 0 }}
+                    animate={{ pathLength: 1, opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.8, ease: "easeOut" }}
+                    style={{ filter: `drop-shadow(0 0 10px ${beam.color}) drop-shadow(0 0 20px ${beam.color})` }}
+                  />
+                </motion.svg>
+              )}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+
+        {/* PANEL 2: CHAT PANEL */}
+        {activeAgent && (
+          <motion.div
+            initial={{ opacity: 0, x: 200, scale: 1 }}
+            animate={{
+              opacity: isSupernova ? 0 : 1,
+              x: 0,
+              scale: isSupernova ? 0 : 1
+            }}
+            exit={{ opacity: 0, x: 200 }}
+            transition={{ type: "spring", stiffness: 80, damping: 25, mass: 1 }}
+            className="chat-panel fixed right-6 top-6 bottom-6 w-[calc(100%-3rem)] md:w-[600px] lg:w-[720px] premium-glass flex flex-col font-inter z-30 shadow-[0_0_100px_rgba(0,0,0,0.9)] overflow-hidden rounded-[2.5rem] hardware-accelerated"
+            style={{
+              perspective: 1200,
+              transformStyle: "preserve-3d",
+              border: "1px solid rgba(255,255,255,0.08)"
+            }}
+          >
+            <div
+              className="absolute inset-0 opacity-[0.06] pointer-events-none"
+              style={{
+                background: `radial-gradient(ellipse at top right, ${activeAgent.color}, transparent 75%)`
+              }}
+            />
+
+            <div className="relative h-24 shrink-0 border-b border-white/[0.08] flex items-center justify-between px-8 bg-white/[0.01]">
+              <div
+                className="absolute left-0 top-0 bottom-0 w-1.5"
+                style={{ backgroundColor: activeAgent.color, boxShadow: `0 0 15px ${activeAgent.color}80` }}
+              />
+              <div className="flex items-center gap-5">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-2xl transition-transform duration-500 hover:rotate-6" style={{ backgroundColor: `${activeAgent.color}30`, border: `1px solid ${activeAgent.color}50` }}>
+                  <activeAgent.icon className="w-7 h-7" style={{ color: activeAgent.color, filter: `drop-shadow(0 0 8px ${activeAgent.color})` }} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">{activeAgent.name}</h2>
+                  <div className="flex items-center gap-2.5 mt-1.5">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: activeAgent.color, boxShadow: `0 0 8px ${activeAgent.color}` }} />
+                    <span className="text-xs text-gray-400 font-bold uppercase tracking-[0.2em]">Neural Link Active</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => resetChat(activeAgent.id)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 transition-all text-xs font-bold text-gray-400 hover:text-white border border-white/5 hover:border-white/20 group"
+                  title="New Chat"
+                >
+                  <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-700" />
+                  <span className="hidden sm:inline uppercase tracking-widest">Reset</span>
+                </button>
+                <button
+                  onClick={closeChat}
+                  className="p-3 rounded-xl hover:bg-red-500/10 transition-all text-gray-400 hover:text-red-400 border border-transparent hover:border-red-500/20"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+              {activeMessages.map((msg) => (
+                <MemoizedChatMessage
+                  key={msg.id}
+                  msg={msg}
+                  activeAgent={activeAgent}
+                  handleCopy={handleCopy}
+                  handleSpeak={handleSpeak}
+                  handleFeedback={handleFeedback}
+                  copiedId={copiedId}
+                />
+              ))}
+              <div ref={messagesEndRef} className="h-4" />
+            </div>
+
+            {/* TYPING INDICATOR */}
+            {isStreaming && (
+              <div className="px-8 py-3 flex items-center gap-3" style={{ color: activeAgent.color }}>
+                <div className="p-1 px-2.5 rounded-lg bg-white/5 border border-white/10 flex items-center gap-2.5 backdrop-blur-sm">
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: activeAgent.color, boxShadow: `0 0 8px ${activeAgent.color}` }} />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-90">Engine Processing</span>
+                </div>
+              </div>
+            )}
+
+            <ChatInput
+              onSend={(val: string) => handleSendMessage(undefined, val)}
+              activeAgent={activeAgent}
+              selectedFile={selectedFile}
+              setSelectedFile={setSelectedFile}
+              isRecording={isRecording}
+              toggleRecording={toggleRecording}
+              fileInputRef={fileInputRef}
+              handleFileChange={handleFileChange}
+              startWebcam={startWebcam}
+              soundOn={soundOn}
+            />
+          </motion.div>
+        )}
+      </div>
+
+      {/* WEBCAM OVERLAY */}
+      {isWebcamActive && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center backdrop-blur-md">
+          <div className="relative bg-[#0d1117] p-4 rounded-3xl border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)]">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className="rounded-2xl w-[90vw] max-w-[800px] aspect-video object-cover bg-black"
+            />
+
+            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-6">
+              <button
+                onClick={stopWebcam}
+                className="w-12 h-12 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-500 flex items-center justify-center backdrop-blur-md transition-colors border border-red-500/50"
+              >
+                <X className="w-6 h-6" />
+              </button>
+              <button
+                onClick={capturePhoto}
+                className="w-[72px] h-[72px] rounded-full bg-white hover:bg-gray-200 flex items-center justify-center flex-shrink-0 shadow-[0_0_30px_rgba(255,255,255,0.3)] transition-all border-[6px] border-white/20 hover:scale-105 active:scale-95"
+              >
+                <Camera className="w-8 h-8 text-black fill-transparent" />
+              </button>
+            </div>
+
+            <div className="absolute top-8 left-8 text-white text-sm font-semibold tracking-widest flex items-center gap-3 bg-black/60 px-5 py-2.5 rounded-full backdrop-blur-md border border-white/10">
+              <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+              LIVE FEED
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING STATS PANEL */}
+      {showStats && (
+        <div className="fixed bottom-6 left-6 z-50 bg-[#0d1117]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-4 w-52 shadow-2xl font-inter">
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/5">
+            <BarChart2 className="w-4 h-4 text-purple-400" />
+            <span className="text-[11px] font-orbitron font-bold tracking-widest text-purple-300">SYSTEM STATS</span>
+          </div>
+          <div className="space-y-2.5 text-[12px]">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500">Latency</span>
+              <span className={`font-bold ${latency < 2000 ? 'text-emerald-400' : latency < 5000 ? 'text-yellow-400' : 'text-red-400'}`}>{latency > 0 ? `${(latency / 1000).toFixed(1)}s` : '—'}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500">Sliding RPM</span>
+              <span className={`font-bold ${rpmData.rpm > 12 ? 'text-red-400' : 'text-cyan-400'}`}>{rpmData.rpm}/{rpmData.limit}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500">Neural Load</span>
+              <span className={`font-bold transition-colors duration-300 ${rpmData.intensity > 12 ? 'text-red-500 animate-pulse' : rpmData.intensity > 8 ? 'text-orange-400' : 'text-emerald-400'}`}>
+                {Math.round(rpmData.intensity)} RPM
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500">Messages</span>
+              <span className="font-bold text-white">{totalMessages}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500">Theme</span>
+              <span className="font-bold text-white capitalize">{theme}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500">Sound</span>
+              <span className={`font-bold ${soundOn ? 'text-emerald-400' : 'text-gray-500'}`}>{soundOn ? 'ON' : 'OFF'}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* COMMAND PALETTE */}
+      {showPalette && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[15vh]"
+          onClick={() => setShowPalette(false)}
+        >
+          <div
+            className="w-full max-w-lg mx-4 bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
+              <Search className="w-4 h-4 text-gray-500 shrink-0" />
+              <input
+                autoFocus
+                value={paletteQuery}
+                onChange={e => setPaletteQuery(e.target.value)}
+                placeholder="Search agents..."
+                className="flex-1 bg-transparent text-white text-sm outline-none placeholder:text-gray-600"
+              />
+              <kbd className="text-[10px] text-gray-600 border border-white/10 rounded px-1.5 py-0.5">ESC</kbd>
+            </div>
+            <div className="max-h-72 overflow-y-auto py-2">
+              {filteredPlanets.length === 0 ? (
+                <p className="text-center text-gray-600 text-sm py-6">No agents found</p>
+              ) : filteredPlanets.map(planet => (
+                <button
+                  key={planet.id}
+                  onClick={() => { handlePlanetClick(planet); setShowPalette(false); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left group"
+                >
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${planet.color}20`, border: `1px solid ${planet.color}40` }}>
+                    <planet.icon className="w-4 h-4" style={{ color: planet.color }} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white group-hover:text-white">{planet.name}</p>
+                    <p className="text-[11px] text-gray-600 leading-tight mt-0.5">{(PLANET_DETAILS as any)[planet.id]?.slice(0, 55)}...</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="px-4 py-2 border-t border-white/5 flex items-center gap-3">
+              <span className="text-[10px] text-gray-600">Press <kbd className="border border-white/10 rounded px-1">/</kbd> to open anytime</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUPERNOVA EXPLOSION ALFA */}
+      <AnimatePresence>
+        {isSupernova && (
+          <motion.div
+            className="fixed inset-0 z-[500] pointer-events-none flex items-center justify-center"
+            style={{ willChange: "transform, opacity", transform: "translateZ(0)" }}
+          >
+            {/* The white core flash */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.5 }}
+              animate={{ opacity: [0, 1, 0], scale: [0.5, 2, 4] }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="absolute inset-0 bg-white"
+              style={{ willChange: "transform, opacity", transform: "translateZ(0)" }}
+            />
+            {/* Optimized GPU Shockwave Ring */}
+            <motion.div
+              initial={{ opacity: 1, scale: 0 }}
+              animate={{ opacity: 0, scale: 4 }}
+              transition={{ duration: 0.6, ease: "easeOut" }}
+              className="absolute rounded-full border-[8px] border-solid"
+              style={{
+                width: "50vh",
+                height: "50vh",
+                borderColor: activeAgent ? activeAgent.color : "#fff",
+                willChange: "transform, opacity",
+                transform: "translateZ(0)"
+              }}
+            />
+            {/* Optimized Static Nebula Burst */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0 }}
+              animate={{ opacity: [0, 0.6, 0], scale: [0, 3, 5] }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="absolute rounded-full"
+              style={{
+                width: "40vh",
+                height: "40vh",
+                background: `radial-gradient(circle, ${activeAgent?.color || '#fff'} 0%, transparent 70%)`,
+                willChange: "transform, opacity",
+                transform: "translateZ(0)"
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
