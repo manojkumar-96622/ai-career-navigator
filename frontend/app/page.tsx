@@ -719,7 +719,8 @@ export default function ARIAInterface() {
     });
 
     try {
-      await fetch(`http://127.0.0.1:8080/feedback`, {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080";
+      await fetch(`${baseUrl}/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -739,7 +740,8 @@ export default function ARIAInterface() {
 
     setTimeout(async () => {
       try {
-        await fetch(`http://127.0.0.1:8080/chat/session/${agentId}`, {
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080";
+        await fetch(`${baseUrl}/chat/session/${agentId}`, {
           method: "DELETE",
         });
         setChatHistories(prev => {
@@ -821,7 +823,9 @@ export default function ARIAInterface() {
     const fetchRPM = async () => {
       // Use current window location to avoid hardcoded 127.0.0.1/localhost mismatch
       const host = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8080`;
       const urls = [
+        `${baseUrl}/usage`,
         `http://${host}:8080/usage`,
         `http://127.0.0.1:8080/usage`,
         `http://localhost:8080/usage`
@@ -1077,7 +1081,8 @@ export default function ARIAInterface() {
       }
 
       let res = null;
-      const streamUrls = ["http://127.0.0.1:8080/chat/stream", "http://localhost:8080/chat/stream"];
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080";
+      const streamUrls = [`${baseUrl}/chat/stream`, "http://127.0.0.1:8080/chat/stream", "http://localhost:8080/chat/stream"];
       
       // 30-second timeout — prevents infinite "Thinking..." when backend hangs
       const controller = new AbortController();

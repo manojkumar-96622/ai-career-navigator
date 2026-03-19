@@ -1,4 +1,4 @@
-export async function analyzeEmotion(messageText: string, backendUrl = "http://127.0.0.1:8080"): Promise<string> {
+export async function analyzeEmotion(messageText: string, backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080"): Promise<string> {
   if (!messageText || messageText.trim() === "") return "CALM";
 
   const lowerText = messageText.toLowerCase();
