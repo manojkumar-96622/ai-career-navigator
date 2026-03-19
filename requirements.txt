@@ -18,3 +18,4 @@ pillow
 python-multipart
 google-cloud-aiplatform
 google-auth
+fpdf
