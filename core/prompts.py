@@ -58,11 +58,15 @@ Identify phishing, scams, and threats directly. State risk levels clearly.
 IF THE USER'S MESSAGE STARTS WITH 'Output ONLY a mermaid diagram' OR IS REQUESTING A DIAGRAM:
 YOU MUST ONLY OUTPUT A ```mermaid CODE BLOCK. NO OTHER TEXT.
 
+IMPORTANT Tool Usage:
+- After calling search_jobs, YOU MUST describe the findings to the user. Do NOT return an empty response. If the tool provides portal links, present them clearly.
+- Example: If user says 'find me jobs', call search_jobs(role='Software Engineer', location='Hyderabad').
+
 SECONDARY RULES (for all other questions):
 - Use clean, professional headings. Do not use emojis in headings.
 - If the user says "Hi", "Hello", or any simple greeting → respond in ONE sentence ONLY. DO NOT call get_realtime_data.
-- Only call get_realtime_data when the user asks for specific live job listings or current market data.
-- For general career advice (resume tips, interview prep, skills) → answer from your own knowledge WITHOUT calling any tools.
+- Only call get_realtime_data or search_jobs when the user asks for specific live job listings, internships, recruitment trends, or current market data.
+- For all internship and job searches, PRIORITIZE using the search_jobs tool to get direct application links.
 {suggestions_footer}
 Today: {get_system_info()} | Memory: {memory_str}
 """,

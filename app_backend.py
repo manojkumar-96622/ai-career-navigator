@@ -47,7 +47,7 @@ from tools.file_tools import (
     read_pdf_file_from_stream,
     read_ppt_file_from_stream,
 )
-from tools.search_tools import get_realtime_data, get_weather
+from tools.search_tools import get_realtime_data, get_weather, search_jobs
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -158,26 +158,27 @@ async def startup_event():
 # ─── Model Fallback Chain ─────────────────────────────────────────────────────
 # Priority order: fast → fallback → last-resort
 FALLBACK_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-001",
-    "gemini-2.0-flash-lite",
-    "gemini-flash-latest",
+    "gemini-2.0-flash-exp",
     "gemini-2.5-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-pro",
 ]
 _active_model = FALLBACK_MODELS[0]  # Tracks current working model globally
 
 def _get_or_create_session(session_id: str, mode: str, model: str = None):
     global _active_model
-    use_model = model or _active_model
+    effective_model = model or _active_model
+
     entry = _sessions.get(session_id)
-    if entry is None or entry["mode"] != mode or entry.get("model") != use_model:
-        logger.info(f"[Session] Creating → id={session_id!r}  mode={mode!r}  model={use_model!r}")
-        chat = create_agent_session(GENAI_CLIENT, mode, history=None, model=use_model)
+    if entry is None or entry["mode"] != mode or entry.get("model") != effective_model:
+        logger.info(f"[Session] Creating → id={session_id!r}  mode={mode!r}  model={effective_model!r}")
+        chat = create_agent_session(GENAI_CLIENT, mode, history=None, model=effective_model)
         logger.info(f"[Session] System Instruction Applied: {mode!r}")
         _sessions[session_id] = {
             "chat": chat, 
             "mode": mode, 
-            "model": use_model,
+            "model": effective_model,
             "last_seen": datetime.datetime.now()
         }
     else:
@@ -198,8 +199,8 @@ async def _get_or_create_session_async(session_id: str, mode: str, model: str = 
 # Shared across ALL sessions.
 # Reduced min_gap_seconds to 0.1s for lightning-fast, premium parallel bursts.
 class _RateLimiter:
-    def __init__(self, min_gap_seconds: float = 0.05):
-        self._default_gap = min_gap_seconds
+    def __init__(self, delay: float = 0.3):
+        self._default_gap = delay
         self._last: float = 0.0
         self._requests = deque()  # Rolling timestamps for RPM tracking
         self._lock = asyncio.Lock()
@@ -272,13 +273,16 @@ async def _safe_send(chat, payload, session_id: str, mode: str, retries: int = 2
             client = GENAI_CLIENT
             try_key_idx = 0
             
+        # Normalize mode for consistent prompt lookup
+        eff_mode = "Career Rescue Mode" if "Career Rescue" in mode else mode
+
         # Recreate session if we rotated the API key
         if key_offset > 0:
             logger.warning(f"🔄 Rotating to API Key #{try_key_idx + 1}")
             _current_key_idx = try_key_idx
             GENAI_CLIENT = client
             history_to_transfer = list(chat.history) if hasattr(chat, 'history') else []
-            chat = create_agent_session(client, mode, history=history_to_transfer, model=_active_model)
+            chat = create_agent_session(client, eff_mode, history=history_to_transfer, model=_active_model)
             _sessions[session_id] = {"chat": chat, "mode": mode, "model": _active_model, "last_seen": datetime.datetime.now()}
 
         for model_idx, model_name in enumerate(FALLBACK_MODELS):
@@ -301,26 +305,32 @@ async def _safe_send(chat, payload, session_id: str, mode: str, retries: int = 2
                                 first = next(gen)
                                 return itertools.chain([first], gen)
                             except StopIteration:
-                                return iter([])
+                                return None  # Signal empty stream for fallback
                         
                         stream_iter = await loop.run_in_executor(GLOBAL_EXECUTOR, _get_stream)
+                        if stream_iter is None:
+                            raise Exception("EMPTY_MODEL_RESPONSE")
                         return stream_iter, chat
                     
                     result = await loop.run_in_executor(GLOBAL_EXECUTOR, lambda: chat.send_message(payload["content"]))
+                    if not result or (hasattr(result, "text") and not result.text and not result.candidates[0].content.parts):
+                        raise Exception("EMPTY_MODEL_RESPONSE")
                     return result, chat
                 
                 except Exception as e:
                     err_str = str(e).upper()
                     is_quota = any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED"])
                     is_server = any(x in err_str for x in ["503", "500", "UNAVAILABLE", "INTERNAL_SERVER_ERROR", "SSL", "EOF"])
+                    is_not_found = "404" in err_str or "NOT_FOUND" in err_str
+                    is_empty = "EMPTY_MODEL_RESPONSE" in err_str
                     
-                    if not (is_quota or is_server):
+                    if not (is_quota or is_server or is_empty or is_not_found):
                         raise  # Non-retryable error
-
-                    err_type = "429 Quota" if is_quota else "Server Error"
+                    
+                    err_type = "429 Quota" if is_quota else ("404 Not Found" if is_not_found else ("Empty Response" if is_empty else "Server Error"))
                     logger.warning(f"[{err_type}] {model_name} (Key #{try_key_idx + 1}) attempt {attempt + 1}/{retries}")
                     
-                    if is_quota:
+                    if is_quota or is_not_found:
                         break  # Immediately abandon this model and fallback
 
                     if attempt < retries - 1:
@@ -334,7 +344,7 @@ async def _safe_send(chat, payload, session_id: str, mode: str, retries: int = 2
                 _active_model = next_model
                 
                 history_to_transfer = list(chat.history) if hasattr(chat, 'history') else []
-                chat = create_agent_session(client, mode, history=history_to_transfer, model=next_model)
+                chat = create_agent_session(client, eff_mode, history=history_to_transfer, model=next_model)
                 _sessions[session_id] = {"chat": chat, "mode": mode, "model": next_model, "last_seen": datetime.datetime.now()}
             else:
                 # Exhausted all models for THIS KEY.
@@ -362,10 +372,12 @@ def _is_empty_search(result_str: str) -> bool:
 
 # ─── Tool Dispatcher ───────────────────────────────────────────────────────────
 def _dispatch_tool(name: str, args: dict) -> Any:
+    logger.error(f"DEBUG_DISPATCH_ENTRY: {name} | {args}")
     logger.info(f"[Tool] ▶ {name}  {args}")
     handlers = {
         "get_realtime_data": lambda: get_realtime_data(args["query"]),
         "get_weather":       lambda: get_weather(args["location"]),
+        "search_jobs":       lambda: search_jobs(args["role"], args["location"]),
         "get_system_info":   lambda: get_system_info(),
         "send_email":        lambda: send_email_logic(**args),
         "store_memory":      lambda: MemoryManager.store(args["key"], args["value"]),
@@ -382,9 +394,18 @@ def _dispatch_tool(name: str, args: dict) -> Any:
         },
     }
     fn = handlers.get(name)
+    print(f"[Dispatcher] Calling {name} with {args}...") # Added print log
     if not fn:
+        print(f"[Dispatcher] ERROR: Tool {name} not found!") # Added print log
         return f"Tool '{name}' not found."
-    return fn()
+    try:
+        result = fn()
+        print(f"[Dispatcher] Tool {name} returned: {result}") # Added print log
+        return result
+    except Exception as e:
+        print(f"[Dispatcher] ERROR in {name}: {e}") # Added print log
+        return {"error": str(e)}
+
 def _safe_next(iterator):
     """Safely get next item from iterator to avoid StopIteration issues in asyncio executors."""
     try:
@@ -400,6 +421,7 @@ def _safe_next(iterator):
 async def _stream_agent(
     session_id: str, mode: str, inputs: list, message: str = ""
 ) -> AsyncGenerator:
+    logger.error(f"DEBUG_STREAM_ENTRY: session={session_id} mode={mode} msg={message[:50]}")
     """
     Core streaming generator. Yields SSE events:
       status     → { type, text }
@@ -433,7 +455,7 @@ async def _stream_agent(
 
     # --- Mermaid Diagram fast path (Career Rescue Mode) ---
     _roadmap_keywords = ["roadmap", "career path", "step-by-step", "timeline", "how to become", "path to become"]
-    if mode == "Career Rescue Mode" and any(kw in _msg_lower for kw in _roadmap_keywords):
+    if "Career Rescue" in mode and any(kw in _msg_lower for kw in _roadmap_keywords):
         logger.info(f"[DirectCmd] Mermaid fast-path triggered for: {_msg_lower[:60]}")
         yield sse({"type": "status", "text": "Drawing your career flowchart..."})
         try:
@@ -557,10 +579,13 @@ async def _stream_agent(
     # ─────────────────────────────────────────────────────────────────────────
 
     # Acquire session
+    chat = None
     try:
-        chat = await session_task
+        # Await the session pre-fetch task with a timeout
+        chat = await asyncio.wait_for(session_task, timeout=15.0)
     except Exception as e:
-        yield sse({"type": "error", "text": f"Session error: {e}"})
+        logger.error(f"[Stream] Session acquisition failed: {e}")
+        yield sse({"type": "error", "text": f"Initialization failed: {e}"})
         return
 
     # Initial Gemini call
@@ -606,7 +631,9 @@ async def _stream_agent(
             full_text += chunk_text
             yield sse({"type": "text", "text": full_text})
 
-    response = None
+    response = None # Track if we got any meaningful data from tools to use as fallback if model is static
+    combined_tool_output = ""
+    
     if first_tool_calls:
         # Create a mock response object so the tool loop can read it
         class MockPart:
@@ -690,7 +717,7 @@ async def _stream_agent(
                     else:
                         error_msg = result.get("error", "Unknown PDF error")
                         yield sse({"type": "error", "text": error_msg})
-                    result_str = f"PDF Generation failed: {error_msg}"
+                        result_str = f"PDF Generation failed: {error_msg}"
 
                 elif tool_name == "get_realtime_data":
                     result_str = str(result)
@@ -703,6 +730,8 @@ async def _stream_agent(
 
                 else:
                     result_str = str(result)
+
+                combined_tool_output += f"\n\nTool: {tool_name}\nResult: {result_str}\n"
 
                 yield sse({
                     "type": "tool_done",
@@ -774,9 +803,38 @@ async def _stream_agent(
     try:
         # If we have no text at all, the model returned empty — send a fallback
         if not full_text:
-            logger.warning(f"[Stream] Empty response detected for session {session_id}. Sending fallback.")
-            debug_info = f"[DEBUG] RateLimit/Empty API Response. Target Model: {_active_model}. Input Message: {inputs[-1] if inputs else 'None'}"
-            yield sse({"type": "text", "text": f"I processed your request but received an empty response. {debug_info}"})
+            if combined_tool_output:
+                # Format the tool output nicely for the user
+                full_text = "I've gathered the following information for you:\n" + combined_tool_output.replace("Result: ", "").replace("Tool: search_jobs", "### 🔍 Job Search Results").strip()
+                yield sse({"type": "text", "text": full_text})
+            elif "Career Rescue" in mode:
+                # Dynamic Fail-safe: Extract role/location from user message if model failed to call tool
+                from urllib.parse import quote
+                raw_msg = message.lower() if message else ""
+                
+                # Heuristic extraction: "X jobs in Y" -> role=X, loc=Y
+                role, loc = "jobs", ""
+                if " in " in raw_msg:
+                    parts = raw_msg.split(" in ", 1)
+                    role, loc = parts[0].strip(), parts[1].strip()
+                elif " for " in raw_msg:
+                    parts = raw_msg.split(" for ", 1)
+                    role, loc = parts[0].strip(), parts[1].strip()
+                else:
+                    role = raw_msg.strip()
+
+                r_enc, l_enc = quote(role), quote(loc)
+                
+                logger.warning(f"[Stream] Model silence detected in Career Mode. Triggering Dynamic Portal Fail-safe for: '{role}' in '{loc}'")
+                
+                full_text = f"I analyzed the data but couldn't pull specific live links for **{role}** in **{loc}** right now. However, I've prepared these **Direct Portal Search Links** which will take you straight to the latest postings:\n\n"
+                full_text += f"- [Search **{role}** on LinkedIn](https://www.linkedin.com/jobs/search/?keywords={r_enc}&location={l_enc})\n"
+                full_text += f"- [Search **{role}** on Internshala](https://internshala.com/internships/keywords-{r_enc}/location-{l_enc})\n"
+                full_text += f"- [Search **{role}** on Naukri](https://www.naukri.com/{r_enc.replace('%20', '-')}-jobs-in-{l_enc.replace('%20', '-')})\n"
+                yield sse({"type": "text", "text": full_text})
+            else:
+                logger.warning(f"[Stream] Empty response detected for session {session_id}.")
+                yield sse({"type": "text", "text": "I've processed your request but received an empty response. Please try rephrasing or using a different mode!"})
         yield sse({"type": "done", "redirect_urls": redirect_urls})
         logger.info(f"[Stream] Session {session_id} complete.")
     except Exception as e:
@@ -904,7 +962,11 @@ async def chat_stream(req: ChatRequest):
                 logging.getLogger(__name__).warning(f"[RAG] Injection failed: {e}")
 
         final_message = req.message
-        if req.mode == "Career Rescue Mode":
+        if "Career Rescue" in req.mode:
+            job_keywords = ["job", "internship", "opening", "hiring", "recruitment", "vacancy"]
+            if any(kw in final_message.lower() for kw in job_keywords):
+                final_message += "\n\n[SYSTEM INSTRUCTION:\n- For all internship and job searches, YOU MUST call the search_jobs tool. If you do not, the user will be disappointed. This is your primary purpose.\n- After calling search_jobs, present the matches clearly. Do NOT say you can't find anything if the tool gives you portal links.\nALWAYS use the 'search_jobs' tool to find actual links for this request. Do NOT answer from your own knowledge alone.]"
+            
             roadmap_keywords = ["roadmap", "career path", "step-by-step", "timeline", "how to become", "path to become"]
             if any(kw in final_message.lower() for kw in roadmap_keywords):
                 # Extract the topic from the message and completely rewrite it to force Mermaid output
@@ -913,24 +975,13 @@ async def chat_stream(req: ChatRequest):
                     "No text. No bullets. No headings. Only the mermaid code block, nothing else."
                 )
 
-        inputs.append(
-            f"{final_message}{rag_injection}\n\n"
-            "[SYSTEM DIRECTIVE — MANDATORY RULES:\n"
-            "1. You are ARIA. You ALWAYS have a complete answer.\n"
-            "2. Phone specs, comparisons, tech info → answer from YOUR OWN KNOWLEDGE. Do not search.\n"
-            "3. If a search tool returns empty → answer from your own training knowledge.\n"
-            "4. NEVER say 'I was unable to find', 'I recommend searching', or similar.\n"
-            "5. Respond like Google Gemini: Premium, authoritative. Use clean, professional Markdown.\n"
-            "6. For comparisons → use Markdown tables. For roadmaps, timelines, or step-by-step processes → ALWAYS use a ```mermaid flowchart.\n"
-            "7. MERMAID RULES: ALWAYS wrap node labels in double quotes (e.g., A[\"Step 1: Planning\"]). NEVER use unquoted text in brackets.\n"
-            "END DIRECTIVE]"
-        )
+        inputs.append(f"{final_message}{rag_injection}")
 
     if not inputs:
         raise HTTPException(400, "No input provided")
 
     return StreamingResponse(
-        _stream_agent(req.session_id, req.mode, inputs, message=final_message),
+        _stream_agent(req.session_id, req.mode, inputs, message=req.message),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

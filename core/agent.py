@@ -56,6 +56,21 @@ def create_agent_session(client, mode, history=None, model: str = "gemini-2.0-fl
             },
         ),
         types.FunctionDeclaration(
+            name="search_jobs",
+            description=(
+                "MANDATORY: Call this to find live job/internship links on LinkedIn, Internshala, and Naukri. "
+                "Use whenever the user asks for 'jobs', 'internships', or 'openings'."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {
+                    "role": {"type": "STRING", "description": "Job title, e.g. 'Frontend Developer'"},
+                    "location": {"type": "STRING", "description": "City, e.g. 'Hyderabad'"},
+                },
+                "required": ["role", "location"],
+            },
+        ),
+        types.FunctionDeclaration(
             name="get_map_distance",
             description=(
                 "Get driving distance, travel time, and directions between two locations. "
@@ -173,26 +188,11 @@ def create_agent_session(client, mode, history=None, model: str = "gemini-2.0-fl
 
     # All safety filters off — ARIA is unrestricted
     safety_settings = [
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold=types.HarmBlockThreshold.BLOCK_NONE),
     ]
 
     # Inject user memory into the system prompt

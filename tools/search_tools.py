@@ -381,5 +381,68 @@ def get_realtime_data(query: str) -> str:
     return ""
 
 
+# ─── Specialized Job Search ────────────────────────────────────────────────────
+def search_jobs(role: str, location: str) -> str:
+    """Specialized search for explicit job/internship links using a multi-strategy race."""
+    query = f"{role} jobs in {location} LinkedIn Internshala Naukri apply"
+    print(f"\n[JobSearch] Racing strategies for: '{query}'")
+    
+    strategies = [
+        ("Google-CSE",   search_google_cse,   query),
+        ("DDGS",         search_ddgs,         query),
+        ("Google-Std",   search_google_std,   query),
+    ]
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=len(strategies)) as executor:
+        future_to_name = {executor.submit(s[1], s[2]): s[0] for s in strategies}
+        
+        all_results = []
+        try:
+            for future in as_completed(future_to_name, timeout=4.0):
+                name = future_to_name[future]
+                try:
+                    res = future.result()
+                    if res and isinstance(res, list):
+                        # Filter for job-like links to ensure high quality
+                        filtered = [r for r in res if any(x in str(r).lower() for x in ["job", "career", "apply", "intern", "hire", "recruitment", "linkedin", "naukri", "internshala"])]
+                        if filtered:
+                            print(f"[JobSearch] Strategy {name} returned {len(filtered)} results.")
+                            all_results.extend(filtered)
+                except Exception as e:
+                    print(f"[JobSearch] Strategy {name} failed: {e}")
+        except Exception as e:
+            print(f"[JobSearch] Race error: {e}")
+
+    if all_results:
+        # Deduplicate while preserving order
+        unique_results = []
+        seen = set()
+        for r in all_results:
+            if r not in seen:
+                unique_results.append(r)
+                seen.add(r)
+        
+        return "FOUND LIVE JOB LINKS:\n" + "\n".join(unique_results[:15])
+
+    # FAIL-SAFE: Generate direct portal search links
+    from urllib.parse import quote
+    r_enc = quote(role)
+    l_enc = quote(location)
+    
+    portal_links = [
+        f"- [Deep Search on LinkedIn](https://www.linkedin.com/jobs/search/?keywords={r_enc}&location={l_enc})",
+        f"- [Deep Search on Internshala](https://internshala.com/internships/keywords-{r_enc}/location-{l_enc})",
+        f"- [Deep Search on Naukri](https://www.naukri.com/{r_enc.replace('%20', '-')}-jobs-in-{l_enc.replace('%20', '-')})",
+        f"- [Deep Search on Indeed](https://www.indeed.com/jobs?q={r_enc}&l={l_enc})"
+    ]
+    
+    return (
+        "I couldn't extract individual job links directly right now (possibly due to site restrictions), "
+        "but I've generated these **Direct Portal Search Links** for you which will take you straight to the latest postings:\n\n"
+        + "\n".join(portal_links)
+    )
+
+
 # Aliases for compatibility
 get_cached_realtime = get_realtime_data
