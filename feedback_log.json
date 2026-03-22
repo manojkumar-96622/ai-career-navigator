@@ -160,5 +160,11 @@
     "session_id": "general",
     "message_id": "1773221812769_a",
     "rating": "down"
+  },
+  {
+    "timestamp": "2026-03-21 21:23:34",
+    "session_id": "career",
+    "message_id": "1774108406633_a",
+    "rating": "up"
   }
 ]

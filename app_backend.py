@@ -27,6 +27,7 @@ import PIL.Image
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
@@ -98,9 +99,31 @@ app.add_middleware(
 )
 
 # ─── Gemini Client ─────────────────────────────────────────────────────────────
-GENAI_CLIENT = Config.get_genai_client()
-if not GENAI_CLIENT:
-    logger.critical("❌ GOOGLE_API_KEY missing — GENAI_CLIENT is None!")
+api_keys = []
+# Support both naming conventions
+for var_name in ["GOOGLE_API_KEY", "GEMINI_API_KEY"]:
+    if os.getenv(var_name): 
+        api_keys.append(os.getenv(var_name))
+
+for i in range(1, 10):
+    k = os.getenv(f"GOOGLE_API_KEY_{i}") or os.getenv(f"GEMINI_API_KEY_{i}")
+    if k: 
+        api_keys.append(k)
+
+# Deduplicate securely while preserving order
+_unique_keys = []
+for k in api_keys:
+    if k not in _unique_keys: _unique_keys.append(k)
+
+if not _unique_keys:
+    logger.critical("❌ NO API KEYS FOUND in environment!")
+    GENAI_CLIENTS = []
+    GENAI_CLIENT = None
+else:
+    GENAI_CLIENTS = [genai.Client(api_key=k) for k in _unique_keys]
+    GENAI_CLIENT = GENAI_CLIENTS[0]
+
+_current_key_idx = 0
 
 # ─── Global Executor (Prevent Thread Explosion) ───────────────────────────────
 # Shared across all requests to keep resource usage stable.
@@ -237,76 +260,89 @@ _limiter = _RateLimiter()
 
 # ─── Safe Gemini Send ──────────────────────────────────────────────────────────
 async def _safe_send(chat, payload, session_id: str, mode: str, retries: int = 2):
-    """Gemini call with automatic model fallback on 429 quota exhaustion or server errors."""
-    global _active_model
+    """Gemini call with automatic model and key fallback on 429 quota exhaustion."""
+    global _active_model, GENAI_CLIENT, _current_key_idx
     loop = asyncio.get_event_loop()
 
-    for model_idx, model_name in enumerate(FALLBACK_MODELS):
-        # Skip models that ranked below current active model
-        if FALLBACK_MODELS.index(_active_model) > model_idx:
-            continue
-
-        for attempt in range(retries):
-            await _limiter.wait()
-            try:
-                if getattr(chat, "_active_model", None) != model_name:
-                    logger.info(f"[Fallback] ✅ Now using {model_name}")
-                    chat._active_model = model_name
-                
-                # If stream=True, return the stream iterator
-                if payload.get("stream"):
-                    def _get_stream():
-                        import itertools
-                        gen = chat.send_message_stream(payload["content"])
-                        try:
-                            first = next(gen)
-                            return itertools.chain([first], gen)
-                        except StopIteration:
-                            return iter([])
-                    
-                    stream_iter = await asyncio.get_event_loop().run_in_executor(
-                        GLOBAL_EXECUTOR, _get_stream
-                    )
-                    return stream_iter, chat
-                
-                result = await asyncio.get_event_loop().run_in_executor(
-                    GLOBAL_EXECUTOR, lambda: chat.send_message(payload["content"])
-                )
-                return result, chat
-            except Exception as e:
-                err_str = str(e).upper()
-                is_quota = any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED"])
-                is_server = any(x in err_str for x in ["503", "500", "UNAVAILABLE", "INTERNAL_SERVER_ERROR", "SSL", "EOF"])
-                
-                if not (is_quota or is_server):
-                    raise  # Non-retryable error
-
-                err_type = "429 Quota" if is_quota else "Server Error"
-                logger.warning(f"[{err_type}] {model_name} attempt {attempt + 1}/{retries}")
-
-                if is_quota:
-                    # Immediately abandon this model and fallback
-                    break
-
-                if attempt < retries - 1:
-                    await asyncio.sleep(0.5 * (attempt + 1))
-
-        # If we failed, switch to next model
-        next_idx = model_idx + 1
-        if next_idx < len(FALLBACK_MODELS):
-            next_model = FALLBACK_MODELS[next_idx]
-            logger.warning(f"[Fallback] 🔄 {model_name} failed — switching to {next_model}")
-            _active_model = next_model
-            # Recreate session with fallback model, preserving exact history
-            history_to_transfer = list(chat.history) if hasattr(chat, 'history') else []
-            chat = create_agent_session(GENAI_CLIENT, mode, history=history_to_transfer, model=next_model)
-            _sessions[session_id] = {"chat": chat, "mode": mode, "model": next_model}
+    for key_offset in range(max(1, len(GENAI_CLIENTS))):
+        if len(GENAI_CLIENTS) > 0:
+            try_key_idx = (_current_key_idx + key_offset) % len(GENAI_CLIENTS)
+            client = GENAI_CLIENTS[try_key_idx]
         else:
-            raise RuntimeError(
-                f"All models exhausted ({', '.join(FALLBACK_MODELS)}). "
-                "The Gemini API is currently rate-limited (429). Please wait about 60 seconds for the quota to reset. "
-                "Ensure your backend remains running on port 8080."
-            )
+            client = GENAI_CLIENT
+            try_key_idx = 0
+            
+        # Recreate session if we rotated the API key
+        if key_offset > 0:
+            logger.warning(f"🔄 Rotating to API Key #{try_key_idx + 1}")
+            _current_key_idx = try_key_idx
+            GENAI_CLIENT = client
+            history_to_transfer = list(chat.history) if hasattr(chat, 'history') else []
+            chat = create_agent_session(client, mode, history=history_to_transfer, model=_active_model)
+            _sessions[session_id] = {"chat": chat, "mode": mode, "model": _active_model, "last_seen": datetime.datetime.now()}
+
+        for model_idx, model_name in enumerate(FALLBACK_MODELS):
+            # Skip models that ranked below current active model ONLY on the first key attempt
+            if key_offset == 0 and FALLBACK_MODELS.index(_active_model) > model_idx:
+                continue
+
+            for attempt in range(retries):
+                await _limiter.wait()
+                try:
+                    if getattr(chat, "_active_model", None) != model_name:
+                        logger.info(f"[Fallback] ✅ Now using {model_name} (Key #{try_key_idx + 1})")
+                        chat._active_model = model_name
+                    
+                    if payload.get("stream"):
+                        def _get_stream():
+                            import itertools
+                            gen = chat.send_message_stream(payload["content"])
+                            try:
+                                first = next(gen)
+                                return itertools.chain([first], gen)
+                            except StopIteration:
+                                return iter([])
+                        
+                        stream_iter = await loop.run_in_executor(GLOBAL_EXECUTOR, _get_stream)
+                        return stream_iter, chat
+                    
+                    result = await loop.run_in_executor(GLOBAL_EXECUTOR, lambda: chat.send_message(payload["content"]))
+                    return result, chat
+                
+                except Exception as e:
+                    err_str = str(e).upper()
+                    is_quota = any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED"])
+                    is_server = any(x in err_str for x in ["503", "500", "UNAVAILABLE", "INTERNAL_SERVER_ERROR", "SSL", "EOF"])
+                    
+                    if not (is_quota or is_server):
+                        raise  # Non-retryable error
+
+                    err_type = "429 Quota" if is_quota else "Server Error"
+                    logger.warning(f"[{err_type}] {model_name} (Key #{try_key_idx + 1}) attempt {attempt + 1}/{retries}")
+                    
+                    if is_quota:
+                        break  # Immediately abandon this model and fallback
+
+                    if attempt < retries - 1:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+
+            # If we failed (and exhausted retries or hit Quota), switch to next model on same key
+            next_idx = model_idx + 1
+            if next_idx < len(FALLBACK_MODELS):
+                next_model = FALLBACK_MODELS[next_idx]
+                logger.warning(f"[Fallback] 🔄 {model_name} failed — switching to {next_model}")
+                _active_model = next_model
+                
+                history_to_transfer = list(chat.history) if hasattr(chat, 'history') else []
+                chat = create_agent_session(client, mode, history=history_to_transfer, model=next_model)
+                _sessions[session_id] = {"chat": chat, "mode": mode, "model": next_model, "last_seen": datetime.datetime.now()}
+            else:
+                # Exhausted all models for THIS KEY.
+                break 
+
+        # If we exited the inner loop, all models failed for this key. Try next key!
+        
+    raise HTTPException(429, f"API error: All available API keys and models completely exhausted. Please check quotas.")
 
 
 
@@ -394,6 +430,33 @@ async def _stream_agent(
             if hasattr(p, "text") and p.text:
                 _msg_lower = p.text.lower().strip()
                 break
+
+    # --- Mermaid Diagram fast path (Career Rescue Mode) ---
+    _roadmap_keywords = ["roadmap", "career path", "step-by-step", "timeline", "how to become", "path to become"]
+    if mode == "Career Rescue Mode" and any(kw in _msg_lower for kw in _roadmap_keywords):
+        logger.info(f"[DirectCmd] Mermaid fast-path triggered for: {_msg_lower[:60]}")
+        yield sse({"type": "status", "text": "Drawing your career flowchart..."})
+        try:
+            mermaid_prompt = (
+                f"Generate a detailed Mermaid.js flowchart diagram for this career request: '{message.split('[OVERRIDE')[0].strip()}'. "
+                "Rules: Output ONLY the raw mermaid code block. Start with ```mermaid on the first line. "
+                "Use graph TD direction. Include all major steps as nodes. No text before or after the code block."
+            )
+            await _limiter.wait()
+            loop = asyncio.get_event_loop()
+            mermaid_response = await loop.run_in_executor(
+                GLOBAL_EXECUTOR,
+                lambda: GENAI_CLIENT.models.generate_content(
+                    model=_active_model,
+                    contents=mermaid_prompt
+                )
+            )
+            if mermaid_response and mermaid_response.text:
+                yield sse({"type": "text", "text": mermaid_response.text})
+                yield sse({"type": "done", "redirect_urls": []})
+                return
+        except Exception as e:
+            logger.warning(f"[Mermaid] Fast-path failed: {e}. Falling through to normal flow.")
 
     # --- Greeting fast path ---
     _greetings = {"hi", "hello", "hey", "hola", "gm", "gn", "good morning", "good evening", "good afternoon"}
@@ -712,7 +775,8 @@ async def _stream_agent(
         # If we have no text at all, the model returned empty — send a fallback
         if not full_text:
             logger.warning(f"[Stream] Empty response detected for session {session_id}. Sending fallback.")
-            yield sse({"type": "text", "text": "I processed your request but received an empty response from the AI. This can happen when multiple models are rate-limited simultaneously. Please try again in a moment."})
+            debug_info = f"[DEBUG] RateLimit/Empty API Response. Target Model: {_active_model}. Input Message: {inputs[-1] if inputs else 'None'}"
+            yield sse({"type": "text", "text": f"I processed your request but received an empty response. {debug_info}"})
         yield sse({"type": "done", "redirect_urls": redirect_urls})
         logger.info(f"[Stream] Session {session_id} complete.")
     except Exception as e:
@@ -828,16 +892,37 @@ async def chat_stream(req: ChatRequest):
 
     # ── Text message with system directive ────────────────────────────────────
     if req.message:
+        rag_injection = ""
+        if req.mode in ["Legal Shield Mode", "Health Navigator Mode"]:
+            try:
+                from core.rag_engine import search_knowledge
+                context = search_knowledge(req.message)
+                if context:
+                    rag_injection = f"\n\n[VERIFIED OFFICIAL CONTEXT]:\n{context}\nAnswer strictly based on this context. If not fully covered, safely use your own knowledge.\n"
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"[RAG] Injection failed: {e}")
+
+        final_message = req.message
+        if req.mode == "Career Rescue Mode":
+            roadmap_keywords = ["roadmap", "career path", "step-by-step", "timeline", "how to become", "path to become"]
+            if any(kw in final_message.lower() for kw in roadmap_keywords):
+                # Extract the topic from the message and completely rewrite it to force Mermaid output
+                final_message = (
+                    f"Output ONLY a mermaid diagram based on this request: '{req.message}'. "
+                    "No text. No bullets. No headings. Only the mermaid code block, nothing else."
+                )
+
         inputs.append(
-            f"{req.message}\n\n"
+            f"{final_message}{rag_injection}\n\n"
             "[SYSTEM DIRECTIVE — MANDATORY RULES:\n"
             "1. You are ARIA. You ALWAYS have a complete answer.\n"
             "2. Phone specs, comparisons, tech info → answer from YOUR OWN KNOWLEDGE. Do not search.\n"
             "3. If a search tool returns empty → answer from your own training knowledge.\n"
             "4. NEVER say 'I was unable to find', 'I recommend searching', or similar.\n"
-            "5. Respond like Google Gemini: Premium, authoritative, lightning-fast, with flawless Markdown formatting. Structure answers clearly with themed headers (⚡ Executive Summary, 📝 Detailed Analysis, 📊 Structured Insights, ✅ Actionable Steps).\n"
-            "6. For any comparison or structured data → ALWAYS use a beautifully formatted markdown table.\n"
-            "7. PROACTIVITY: At the bottom of every response, provide 3 suggested follow-up questions formatted as individual lines starting with '💡 Suggested Follow-ups:'.\n"
+            "5. Respond like Google Gemini: Premium, authoritative. Use clean, professional Markdown.\n"
+            "6. For comparisons → use Markdown tables. For roadmaps, timelines, or step-by-step processes → ALWAYS use a ```mermaid flowchart.\n"
+            "7. MERMAID RULES: ALWAYS wrap node labels in double quotes (e.g., A[\"Step 1: Planning\"]). NEVER use unquoted text in brackets.\n"
             "END DIRECTIVE]"
         )
 
@@ -845,7 +930,7 @@ async def chat_stream(req: ChatRequest):
         raise HTTPException(400, "No input provided")
 
     return StreamingResponse(
-        _stream_agent(req.session_id, req.mode, inputs, message=req.message),
+        _stream_agent(req.session_id, req.mode, inputs, message=final_message),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
