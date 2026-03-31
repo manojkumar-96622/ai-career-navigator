@@ -598,6 +598,16 @@ async def _stream_agent(
                 if inputs:
                     inputs[0] = f"{inputs[0]}{rag_injection}"
 
+    # ── Direct Command Parser (quota-free fast path) ──────────────────────────
+    # IMPORTANT: Initialize _msg_lower FIRST before any use in security checks below
+    _msg_lower = message.lower().strip() if message else ""
+    if not _msg_lower and inputs:
+        # Extract text from the last user message in the inputs list
+        for p in reversed(inputs):
+            if hasattr(p, "text") and p.text:
+                _msg_lower = p.text.lower().strip()
+                break
+
     # ── Security: Prompt Injection Defense ─────────────────────────────────────
     _sec_msg = _msg_lower.replace(" ", "")
     _blocked_phrases = ["ignoreprevious", "systemprompt", "forgetinstructions", "danmode", "developerinstruction", "bypassinstr"]
@@ -607,15 +617,6 @@ async def _stream_agent(
         yield sse({"type": "done", "redirect_urls": []})
         return
 
-    # ── Direct Command Parser (quota-free fast path) ──────────────────────────
-    # Handles clear action commands WITHOUT calling the LLM to avoid quota hits.
-    _msg_lower = message.lower().strip() if message else ""
-    if not _msg_lower and inputs:
-        # Extract text from the last user message in the inputs list
-        for p in reversed(inputs):
-            if hasattr(p, "text") and p.text:
-                _msg_lower = p.text.lower().strip()
-                break
 
     # --- Mermaid Diagram fast path (Career Rescue Mode) ---
     _roadmap_keywords = ["roadmap", "career path", "step-by-step", "timeline", "how to become", "path to become"]
