@@ -153,18 +153,13 @@ def get_stock_price(query):
     try:
         print(f"[Finance] Fetching ticker: {ticker}")
         # yfinance doesn't have a direct timeout for Ticker init, but history does
+        # we skip info for speed
         data = yf.Ticker(ticker)
-        # We manually wrap this in a future with timeout if possible, 
-        # or at least use the proxy/session support if it were configured.
-        # For now, we'll just rely on the history() timeout if supported or yfinance internal defaults.
-        # Actually, let's use a simpler check:
         hist = data.history(period="1d", timeout=3)
         if hist.empty:
             return None
 
         price = hist["Close"].iloc[-1]
-        # info can be EXTREMELY slow as it scrapes. We skip it for speed.
-        # info = data.info 
         name = TICKER_MAP.get(ticker.lower(), ticker)
         currency = "USD" if "-USD" in ticker or ticker.isupper() else "INR"
 
@@ -267,12 +262,11 @@ def search_manual_scrape(query):
             "Referer": "https://duckduckgo.com/",
             "Accept-Language": "en-US,en;q=0.9",
         }
-        # Bug fix: removed time.sleep(1) — was killing the 2.5s race budget
         resp = requests.post(
             "https://html.duckduckgo.com/html/",
             data={"q": query},
             headers=headers,
-            timeout=1.2  # Extreme speed: 1.2s hard stop for manual scrape
+            timeout=1.2  # Extreme speed: 1.2s hard stop
         )
         if resp.status_code != 200:
             return None
@@ -306,7 +300,14 @@ def get_realtime_data(query: str) -> str:
     query = query.strip()
     query_lower = query.lower()
 
-    # 1. Cache hit
+    # 1. Specialized: Navigation (Fix for typos like 'opem', 'opne', etc.)
+    nav_regex = r"^(open|go to|navigate to|visit|opem|opn|opne|goto)\s+(.*)"
+    match = re.match(nav_regex, query_lower)
+    if match:
+        site_name = match.group(2).strip()
+        return f"[SYSTEM] For opening '{site_name}', ALWAYS use the 'open_website' tool directly instead of searching. This ensures the direct URL is used."
+
+    # 2. Cache hit
     if query in SUCCESS_CACHE:
         print(f"[Cache] Hit for '{query}'")
         return SUCCESS_CACHE[query]
@@ -316,7 +317,7 @@ def get_realtime_data(query: str) -> str:
     # 2. Specialized: Weather
     if "weather" in query_lower:
         loc = re.sub(
-            r"\b(weather|in|at|for|of|the|current|today)\b", "", query_lower
+            r"\b(weather|in|at|for|of|the|current|today|what is|what's)\b", "", query_lower
         ).strip()
         if loc:
             result = get_cached_weather(loc)
@@ -327,31 +328,60 @@ def get_realtime_data(query: str) -> str:
     finance_keywords = [
         "stock", "price", "share", "bitcoin", "btc", "eth", "ethereum",
         "crypto", "usd", "inr", "rupee", "gold", "silver", "oil",
-        "sensex", "nifty", "forex", "rate", "market"
+        "sensex", "nifty", "forex", "rate", "market", "reliance",
+        "tcs", "infosys", "nasdaq", "dow"
     ]
     if any(k in query_lower for k in finance_keywords):
         stock_result = get_stock_price(query)
         if stock_result:
             SUCCESS_CACHE[query] = stock_result
             return stock_result
-        # If yfinance fails, fall through to web search
+        # fall through to web search if yfinance didn't match
 
-    # 4. Parallel web search race — all strategies run simultaneously
+    # 4. Route news/sports/current-events directly through DuckDuckGo News API
+    news_keywords = [
+        "news", "latest", "breaking", "today", "yesterday", "won", "match",
+        "score", "update", "spacex", "launch", "election", "cricket", "ipl",
+        "premier league", "grand prix", "formula 1", "f1", "nba", "nfl",
+        "movie", "movies releasing", "releasing this week", "box office",
+        "sunset", "sunrise", "full moon", "eclipse", "pm", "president",
+        "prime minister", "iphone", "samsung", "announcement", "released"
+    ]
+    use_news_api = any(k in query_lower for k in news_keywords)
+
+    if use_news_api and DDGS:
+        try:
+            print(f"[SEARCH] News-API fast-path for: '{query}'")
+            with DDGS() as ddgs:
+                raw = list(ddgs.news(query, max_results=8))
+                if raw:
+                    lines = [
+                        f"- **{r.get('title', '')}** ({r.get('date', 'recent')}): {r.get('body', '')}"
+                        for r in raw
+                    ]
+                    final = "\n".join(lines[:8])
+                    SUCCESS_CACHE[query] = final
+                    print(f"[SEARCH] News fast-path returned {len(raw)} results")
+                    return final
+        except Exception as e:
+            print(f"[SEARCH] News API failed: {e}")
+
+    # 5. Parallel web search race (DDGS text + Google CSE + Manual Scrape + Google Std)
     strategies = [
-        ("DDGS",         search_ddgs,         query),
-        ("Google-CSE",   search_google_cse,   query),
-        ("Manual-Scrape",search_manual_scrape, query),
-        ("Google-Std",   search_google_std,   query),
+        ("DDGS",          search_ddgs,          query),
+        ("Google-CSE",    search_google_cse,    query),
+        ("Manual-Scrape", search_manual_scrape, query),
+        ("Google-Std",    search_google_std,    query),
     ]
 
-    # Use persistent global executor instead of creating a new one per request
     future_map = {
         SEARCH_EXECUTOR.submit(s[1], *s[2:]): s[0]
         for s in strategies
     }
 
+    best_result = ""
     try:
-        for future in concurrent.futures.as_completed(future_map, timeout=1.5):
+        for future in concurrent.futures.as_completed(future_map, timeout=4.0):
             name = future_map[future]
             try:
                 result = future.result()
@@ -361,24 +391,26 @@ def get_realtime_data(query: str) -> str:
                         if isinstance(result, list)
                         else str(result)
                     )
-                    # Truncation Guard: prevent feeding massive raw text to Gemini
-                    if len(final) > 5000:
-                        final = final[:5000] + "... [Truncated]"
-                    
-                    SUCCESS_CACHE[query] = final
-                    print(f"[SEARCH] Winner: {name}")
-                    return final
+                    if len(final) > 6000:
+                        final = final[:6000] + "... [Truncated]"
+
+                    # Keep the longest/richest result found
+                    if len(final) > len(best_result):
+                        best_result = final
+                        print(f"[SEARCH] Best so far: {name} ({len(final)} chars)")
             except Exception as e:
                 print(f"[SEARCH] {name} error: {e}")
 
     except concurrent.futures.TimeoutError:
-        print("[SEARCH] All strategies timed out after 2.0s")
+        print("[SEARCH] Search strategies timed out after 4s")
 
-    # 5. Return empty string — backend's _is_search_failure() will detect this
-    #    and instruct Gemini to answer from its own knowledge.
-    #    Bug fix: do NOT return a user-facing message here — Gemini reads it literally.
-    print(f"[SEARCH] No results found for '{query}' — backend will use model knowledge")
-    return ""
+    if best_result:
+        SUCCESS_CACHE[query] = best_result
+        return best_result
+
+    # 6. Absolute fallback: let the AI use its own knowledge
+    print(f"[SEARCH] No web results for '{query}' — AI will use own knowledge")
+    return f"[WEB_SEARCH_UNAVAILABLE] Use your own knowledge to answer this confidently: {query}"
 
 
 # ─── Specialized Job Search ────────────────────────────────────────────────────
@@ -404,10 +436,8 @@ def search_jobs(role: str, location: str) -> str:
                 try:
                     res = future.result()
                     if res and isinstance(res, list):
-                        # Filter for job-like links to ensure high quality
                         filtered = [r for r in res if any(x in str(r).lower() for x in ["job", "career", "apply", "intern", "hire", "recruitment", "linkedin", "naukri", "internshala"])]
                         if filtered:
-                            print(f"[JobSearch] Strategy {name} returned {len(filtered)} results.")
                             all_results.extend(filtered)
                 except Exception as e:
                     print(f"[JobSearch] Strategy {name} failed: {e}")
@@ -415,14 +445,12 @@ def search_jobs(role: str, location: str) -> str:
             print(f"[JobSearch] Race error: {e}")
 
     if all_results:
-        # Deduplicate while preserving order
         unique_results = []
         seen = set()
         for r in all_results:
             if r not in seen:
                 unique_results.append(r)
                 seen.add(r)
-        
         return "FOUND LIVE JOB LINKS:\n" + "\n".join(unique_results[:15])
 
     # FAIL-SAFE: Generate direct portal search links
@@ -438,10 +466,52 @@ def search_jobs(role: str, location: str) -> str:
     ]
     
     return (
-        "I couldn't extract individual job links directly right now (possibly due to site restrictions), "
-        "but I've generated these **Direct Portal Search Links** for you which will take you straight to the latest postings:\n\n"
+        "I couldn't extract individual job links directly right now, but I've prepared these **Direct Portal Search Links**:\n\n"
         + "\n".join(portal_links)
     )
+
+
+# ─── Market Pulse: Salary & Trends ───────────────────────────────────────────
+def get_salary_data(role: str, location: str) -> str:
+    """Fetches real-time salary ranges and market trends for a specific role and city."""
+    print(f"\n[MarketPulse] Fetching salary insights for: '{role}' in '{location}'")
+    
+    # Try multiple variants for better precision
+    queries = [
+        f'"{role}" average salary in {location} lpa 2025',
+        f'"{role}" pay scale {location} Glassdoor AmbitionBox',
+        f'"{role}" salary package in {location} freshers'
+    ]
+    
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    all_results = []
+    
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = []
+        for q in queries:
+            futures.append(executor.submit(search_ddgs, q))
+            futures.append(executor.submit(search_google_cse, q))
+            
+        try:
+            for future in as_completed(futures, timeout=6.0):
+                res = future.result()
+                if res and isinstance(res, list):
+                    all_results.extend(res)
+        except Exception as e:
+            print(f"[MarketPulse] Parallel search error: {e}")
+
+    if all_results:
+        salary_keywords = ["salary", "pay", "lpa", "monthly", "package", "compensation", "annual", "range", "earns", "stipend"]
+        salary_filtered = []
+        for r in all_results:
+            body = str(r).lower()
+            if any(k in body for k in salary_keywords):
+                salary_filtered.append(f"{str(r)}")
+        
+        if salary_filtered:
+            return "SALARY & MARKET INSIGHTS FOUND:\n---\n" + "\n\n".join(salary_filtered[:8])
+
+    return "NO_DATA_FOUND"
 
 
 # Aliases for compatibility

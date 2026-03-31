@@ -7,7 +7,7 @@ import googlemaps
 
 load_dotenv(Path(".env"), override=True)
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY_1") or os.getenv("GOOGLE_API_KEY")
 
 class Config:
     GOOGLE_API_KEY = GOOGLE_API_KEY

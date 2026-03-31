@@ -10,6 +10,7 @@ export type CrisisReport = {
     financeHelp: any | null;
     healthHelp: any | null;
     mindSupport: any | null;
+    shieldHelp: any | null;
     generatedAt: number;
     sessionId: string;
 };
@@ -29,6 +30,7 @@ export function compileReport(
         financeHelp: agentResults.financeHelp,
         healthHelp: agentResults.healthHelp,
         mindSupport: agentResults.mindSupport,
+        shieldHelp: agentResults.shieldHelp,
         generatedAt: Date.now(),
         sessionId: `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
     };

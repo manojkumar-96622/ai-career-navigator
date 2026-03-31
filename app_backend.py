@@ -18,6 +18,7 @@ from collections import deque
 import concurrent.futures
 import io
 import json
+import re as _re
 import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -29,6 +30,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from google import genai
 from google.genai import types
+import urllib.parse
+import difflib
+import re
 from pydantic import BaseModel
 
 class FeedbackRequest(BaseModel):
@@ -99,31 +103,15 @@ app.add_middleware(
 )
 
 # ─── Gemini Client ─────────────────────────────────────────────────────────────
-api_keys = []
-# Support both naming conventions
-for var_name in ["GOOGLE_API_KEY", "GEMINI_API_KEY"]:
-    if os.getenv(var_name): 
-        api_keys.append(os.getenv(var_name))
+# Enforce strict single-key operation
+_main_key = os.getenv("GOOGLE_API_KEY_1") or os.getenv("GOOGLE_API_KEY")
 
-for i in range(1, 10):
-    k = os.getenv(f"GOOGLE_API_KEY_{i}") or os.getenv(f"GEMINI_API_KEY_{i}")
-    if k: 
-        api_keys.append(k)
-
-# Deduplicate securely while preserving order
-_unique_keys = []
-for k in api_keys:
-    if k not in _unique_keys: _unique_keys.append(k)
-
-if not _unique_keys:
-    logger.critical("❌ NO API KEYS FOUND in environment!")
-    GENAI_CLIENTS = []
+if not _main_key:
+    logger.critical("❌ NO API KEY FOUND in environment! Set GOOGLE_API_KEY_1 or GOOGLE_API_KEY in .env")
     GENAI_CLIENT = None
 else:
-    GENAI_CLIENTS = [genai.Client(api_key=k) for k in _unique_keys]
-    GENAI_CLIENT = GENAI_CLIENTS[0]
+    GENAI_CLIENT = genai.Client(api_key=_main_key)
 
-_current_key_idx = 0
 
 # ─── Global Executor (Prevent Thread Explosion) ───────────────────────────────
 # Shared across all requests to keep resource usage stable.
@@ -156,13 +144,12 @@ async def startup_event():
 
 
 # ─── Model Fallback Chain ─────────────────────────────────────────────────────
-# Priority order: fast → fallback → last-resort
+# Priority order: verified working → fallbacks
 FALLBACK_MODELS = [
-    "gemini-2.0-flash-exp",
-    "gemini-2.5-flash",
-    "gemini-1.5-flash",
+    "gemini-2.5-flash",        # Verified working on new key
+    "gemini-flash-latest",     # Verified working on new key
+    "gemini-2.5-pro",          # Secondary potential (pro version)
     "gemini-1.5-pro",
-    "gemini-pro",
 ]
 _active_model = FALLBACK_MODELS[0]  # Tracks current working model globally
 
@@ -195,62 +182,54 @@ async def _get_or_create_session_async(session_id: str, mode: str, model: str = 
         )
 
 
-# ─── Async Rate Limiter ────────────────────────────────────────────────────────
-# Shared across ALL sessions.
-# Reduced min_gap_seconds to 0.1s for lightning-fast, premium parallel bursts.
+# --- Async Rate Limiter -------------------------------------------------------
+# User requested maximum speed. Setting RPM limit extremely high to bypass the local 
+# queue and unleash instant stream routing at the risk of 429 quota exhaustion.
+MAX_RPM = 9999  
+
 class _RateLimiter:
-    def __init__(self, delay: float = 0.3):
-        self._default_gap = delay
-        self._last: float = 0.0
-        self._requests = deque()  # Rolling timestamps for RPM tracking
+    def __init__(self):
+        self._requests = deque()   # Rolling timestamps of sent requests
         self._lock = asyncio.Lock()
         import threading
-        self._sync_lock = threading.Lock() # For get_stats in executor
+        self._sync_lock = threading.Lock()  # For get_stats called from executor
 
     async def wait(self):
+        """Block asyncly until a slot is available under MAX_RPM."""
         async with self._lock:
-            now = time.monotonic()
-            # Purge requests older than 60s
-            while self._requests and (now - self._requests[0] > 60):
-                self._requests.popleft()
-            
-            with self._sync_lock:
-                self._requests.append(now)
-            rpm = len(self._requests)
+            while True:
+                now = time.monotonic()
+                # Drop timestamps older than 60 seconds
+                while self._requests and (now - self._requests[0] > 60):
+                    self._requests.popleft()
 
-            # Accelerated Pacing: Allow more burst before slowing down
-            gap = self._default_gap
-            if rpm >= 15:
-                gap = 1.1  # Minimal gap to prevent hard 429 but keep speed
-            elif rpm >= 12:
-                gap = 0.2  # Very light pacing
-            else:
-                gap = 0.0  # Zero latency for bursts under 12 RPM
-            
-            elapsed = now - self._last
-            wait_time = gap - elapsed
-            if wait_time > 0:
-                logger.debug(f"[Rate] Pacing {wait_time:.2f}s (RPM={rpm})")
-                await asyncio.sleep(wait_time)
-            
-            self._last = time.monotonic()
+                if len(self._requests) < MAX_RPM:
+                    # Slot available -- claim it and proceed immediately
+                    with self._sync_lock:
+                        self._requests.append(now)
+                    logger.debug(f"[Rate] Slot ok (RPM={len(self._requests)}/{MAX_RPM})")
+                    return
+                else:
+                    # All slots used -- sleep until oldest slot expires
+                    oldest = self._requests[0]
+                    sleep_for = (oldest + 60.0) - now + 0.05  # +50ms buffer
+                    logger.info(f"[Rate] Throttling {sleep_for:.1f}s (RPM={len(self._requests)}/{MAX_RPM})")
+                    self._lock.release()
+                    try:
+                        await asyncio.sleep(sleep_for)
+                    finally:
+                        await self._lock.acquire()
 
     def get_stats(self):
         with self._sync_lock:
             now = time.monotonic()
-            # Full 60s Window (RPM)
             while self._requests and (now - self._requests[0] > 60):
                 self._requests.popleft()
-            
             rpm_60 = len(self._requests)
-            
-            # Focused 15s Window (Intensity) - scaled to RPM
             recent = [t for t in self._requests if (now - t) <= 15]
-            rpm_15 = len(recent) * 4 # Projected RPM based on immediate activity
-            
-            # Return max of real-time vs sliding window for "snappy" feeling
+            rpm_15 = len(recent) * 4
             return {
-                "rpm": rpm_60, 
+                "rpm": rpm_60,
                 "intensity": rpm_15,
                 "limit": 15
             }
@@ -259,100 +238,131 @@ class _RateLimiter:
 _limiter = _RateLimiter()
 
 
+# ─── History Sanitizer ───────────────────────────────────────────────────────
+def _sanitize_history(history: List[types.Content]) -> List[types.Content]:
+    """
+    Ensures that the history sent to Gemini is valid Tool-Use sequence.
+    Rules:
+    1. A turn with 'function_call' MUST be followed by a turn with 'role: function'.
+    2. If the last turn has 'function_call' but no response follows, we remove those parts
+       or the entire turn to prevent the 400 'immediately after' error.
+    """
+    if not history: return []
+    
+    clean_history = []
+    for i, content in enumerate(history):
+        # Check if this turn had function calls
+        has_calls = any(getattr(p, "function_call", None) for p in content.parts)
+        
+        if has_calls:
+            # Look ahead for a function response
+            if i + 1 < len(history) and history[i+1].role == "function":
+                # Valid sequence
+                clean_history.append(content)
+            else:
+                # INVALID: This turn has calls but no response follows.
+                # Strip the function_calls from this turn to keep the text (if any)
+                new_parts = [p for p in content.parts if not getattr(p, "function_call", None)]
+                if new_parts:
+                    content.parts = new_parts
+                    clean_history.append(content)
+                # If no text remains, skip the whole turn
+                continue
+        else:
+            clean_history.append(content)
+            
+    return clean_history
+
+
 # ─── Safe Gemini Send ──────────────────────────────────────────────────────────
 async def _safe_send(chat, payload, session_id: str, mode: str, retries: int = 2):
-    """Gemini call with automatic model and key fallback on 429 quota exhaustion."""
-    global _active_model, GENAI_CLIENT, _current_key_idx
+    """Gemini call with model fallback on 429 quota exhaustion."""
+    global _active_model, GENAI_CLIENT
     loop = asyncio.get_event_loop()
 
-    for key_offset in range(max(1, len(GENAI_CLIENTS))):
-        if len(GENAI_CLIENTS) > 0:
-            try_key_idx = (_current_key_idx + key_offset) % len(GENAI_CLIENTS)
-            client = GENAI_CLIENTS[try_key_idx]
-        else:
-            client = GENAI_CLIENT
-            try_key_idx = 0
-            
-        # Normalize mode for consistent prompt lookup
-        eff_mode = "Career Rescue Mode" if "Career Rescue" in mode else mode
+    # Normalize mode for consistent prompt lookup
+    eff_mode = "Career Rescue Mode" if "Career Rescue" in mode else mode
 
-        # Recreate session if we rotated the API key
-        if key_offset > 0:
-            logger.warning(f"🔄 Rotating to API Key #{try_key_idx + 1}")
-            _current_key_idx = try_key_idx
-            GENAI_CLIENT = client
-            history_to_transfer = list(chat.history) if hasattr(chat, 'history') else []
-            chat = create_agent_session(client, eff_mode, history=history_to_transfer, model=_active_model)
-            _sessions[session_id] = {"chat": chat, "mode": mode, "model": _active_model, "last_seen": datetime.datetime.now()}
+    for model_idx, model_name in enumerate(FALLBACK_MODELS):
+        # Skip models that ranked below current active model
+        if FALLBACK_MODELS.index(_active_model) > model_idx:
+            continue
 
-        for model_idx, model_name in enumerate(FALLBACK_MODELS):
-            # Skip models that ranked below current active model ONLY on the first key attempt
-            if key_offset == 0 and FALLBACK_MODELS.index(_active_model) > model_idx:
-                continue
+        client = GENAI_CLIENT
 
-            for attempt in range(retries):
-                await _limiter.wait()
-                try:
-                    if getattr(chat, "_active_model", None) != model_name:
-                        logger.info(f"[Fallback] ✅ Now using {model_name} (Key #{try_key_idx + 1})")
-                        chat._active_model = model_name
+        for attempt in range(retries):
+            await _limiter.wait()
+            try:
+                # Sanitize history before sending to prevent 400 Sequential Turn errors
+                if hasattr(chat, "history"):
+                    chat.history = _sanitize_history(list(chat.history))
+
+                if getattr(chat, "_active_model", None) != model_name:
+                    logger.info(f"[Fallback] ✅ Now using {model_name} (Single Key)")
+                    chat._active_model = model_name
+                    _active_model = model_name
+                
+                msg_content = payload["content"]
+                # CRITICAL: google-genai SDK send_message expects a string or list of Parts. 
+                # If we got a Content object, extract the parts to avoid "Message must be a valid part type" error.
+                if hasattr(msg_content, "parts"):
+                    msg_content = msg_content.parts
+
+                if payload.get("stream"):
+                    def _get_stream():
+                        import itertools
+                        gen = chat.send_message_stream(msg_content)
+                        try:
+                            first = next(gen)
+                            return itertools.chain([first], gen)
+                        except StopIteration:
+                            return None  # Signal empty stream for fallback
                     
-                    if payload.get("stream"):
-                        def _get_stream():
-                            import itertools
-                            gen = chat.send_message_stream(payload["content"])
-                            try:
-                                first = next(gen)
-                                return itertools.chain([first], gen)
-                            except StopIteration:
-                                return None  # Signal empty stream for fallback
-                        
-                        stream_iter = await loop.run_in_executor(GLOBAL_EXECUTOR, _get_stream)
-                        if stream_iter is None:
-                            raise Exception("EMPTY_MODEL_RESPONSE")
-                        return stream_iter, chat
-                    
-                    result = await loop.run_in_executor(GLOBAL_EXECUTOR, lambda: chat.send_message(payload["content"]))
-                    if not result or (hasattr(result, "text") and not result.text and not result.candidates[0].content.parts):
+                    stream_iter = await loop.run_in_executor(GLOBAL_EXECUTOR, _get_stream)
+                    if stream_iter is None:
                         raise Exception("EMPTY_MODEL_RESPONSE")
-                    return result, chat
+                    return stream_iter, chat
                 
-                except Exception as e:
-                    err_str = str(e).upper()
-                    is_quota = any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED"])
-                    is_server = any(x in err_str for x in ["503", "500", "UNAVAILABLE", "INTERNAL_SERVER_ERROR", "SSL", "EOF"])
-                    is_not_found = "404" in err_str or "NOT_FOUND" in err_str
-                    is_empty = "EMPTY_MODEL_RESPONSE" in err_str
-                    
-                    if not (is_quota or is_server or is_empty or is_not_found):
-                        raise  # Non-retryable error
-                    
-                    err_type = "429 Quota" if is_quota else ("404 Not Found" if is_not_found else ("Empty Response" if is_empty else "Server Error"))
-                    logger.warning(f"[{err_type}] {model_name} (Key #{try_key_idx + 1}) attempt {attempt + 1}/{retries}")
-                    
-                    if is_quota or is_not_found:
-                        break  # Immediately abandon this model and fallback
-
-                    if attempt < retries - 1:
-                        await asyncio.sleep(0.5 * (attempt + 1))
-
-            # If we failed (and exhausted retries or hit Quota), switch to next model on same key
-            next_idx = model_idx + 1
-            if next_idx < len(FALLBACK_MODELS):
-                next_model = FALLBACK_MODELS[next_idx]
-                logger.warning(f"[Fallback] 🔄 {model_name} failed — switching to {next_model}")
-                _active_model = next_model
+                result = await loop.run_in_executor(GLOBAL_EXECUTOR, lambda: chat.send_message(msg_content))
+                if not result or (hasattr(result, "text") and not result.text and not result.candidates[0].content.parts):
+                    raise Exception("EMPTY_MODEL_RESPONSE")
+                return result, chat
+            
+            except Exception as e:
+                err_str = str(e).upper()
+                is_quota = any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED"])
+                is_server = any(x in err_str for x in ["503", "500", "UNAVAILABLE", "INTERNAL_SERVER_ERROR", "SSL", "EOF"])
+                is_not_found = "404" in err_str or "NOT_FOUND" in err_str
+                is_empty = "EMPTY_MODEL_RESPONSE" in err_str
                 
-                history_to_transfer = list(chat.history) if hasattr(chat, 'history') else []
-                chat = create_agent_session(client, eff_mode, history=history_to_transfer, model=next_model)
-                _sessions[session_id] = {"chat": chat, "mode": mode, "model": next_model, "last_seen": datetime.datetime.now()}
-            else:
-                # Exhausted all models for THIS KEY.
-                break 
+                if not (is_quota or is_server or is_empty or is_not_found):
+                    if "400" in err_str:
+                        logger.error(f"❌ Critical 400 Error on {model_name}. History sequence likely broken.")
+                        if hasattr(chat, "history"):
+                            logger.error(f"   History Length: {len(chat.history)}")
+                    raise  # Non-retryable error
+                
+                err_type = "429 Quota" if is_quota else ("404 Not Found" if is_not_found else ("Empty Response" if is_empty else "Server Error"))
+                logger.warning(f"[{err_type}] {model_name} attempt {attempt + 1}/{retries}")
+                
+                if is_quota or is_not_found:
+                    break  # Immediately abandon this model and move to fallback model
 
-        # If we exited the inner loop, all models failed for this key. Try next key!
-        
-    raise HTTPException(429, f"API error: All available API keys and models completely exhausted. Please check quotas.")
+                if attempt < retries - 1:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+
+        # If all attempts failed for this model, downgrade to the next fallback
+        next_idx = model_idx + 1
+        if next_idx < len(FALLBACK_MODELS):
+            next_model = FALLBACK_MODELS[next_idx]
+            logger.warning(f"[Fallback] 🔄 Model {model_name} exhausted — downgrading to {next_model}")
+            _active_model = next_model
+            
+            history_to_transfer = list(chat.history) if hasattr(chat, 'history') else []
+            chat = create_agent_session(GENAI_CLIENT, eff_mode, history=history_to_transfer, model=next_model)
+            _sessions[session_id] = {"chat": chat, "mode": mode, "model": next_model, "last_seen": datetime.datetime.now()}
+            
+    raise HTTPException(429, f"API error: All available models are currently rate-limited by Google (15 RPM free-tier limit reached). Please wait a few seconds and try again.")
 
 
 
@@ -361,6 +371,9 @@ def _is_empty_search(result_str: str) -> bool:
     """Returns True when get_realtime_data returned nothing useful."""
     if not result_str or len(result_str.strip()) < 30:
         return True
+    # [WEB_SEARCH_UNAVAILABLE] is an intentional signal for AI to use own knowledge — not empty
+    if result_str.strip().startswith("[WEB_SEARCH_UNAVAILABLE]"):
+        return False
     bad_signals = [
         "no results", "unable to find", "error fetching", "search failed",
         "no data found", "could not retrieve", "failed to fetch",
@@ -378,19 +391,14 @@ def _dispatch_tool(name: str, args: dict) -> Any:
         "get_realtime_data": lambda: get_realtime_data(args["query"]),
         "get_weather":       lambda: get_weather(args["location"]),
         "search_jobs":       lambda: search_jobs(args["role"], args["location"]),
+        "get_salary_data":   lambda: get_salary_data(args["role"], args["location"]),
         "get_system_info":   lambda: get_system_info(),
         "send_email":        lambda: send_email_logic(**args),
         "store_memory":      lambda: MemoryManager.store(args["key"], args["value"]),
         "get_map_distance":  lambda: get_map_distance(args["origin"], args["destination"]),
         "convert_to_pdf":    lambda: convert_to_pdf(args["content"]),
         "open_website": lambda: {
-            "opened_urls": [
-                u if u.startswith("http") else f"https://{u}"
-                for u in (
-                    [args["urls"]] if isinstance(args.get("urls"), str)
-                    else args.get("urls", [])
-                )
-            ]
+            "opened_urls": _resolve_urls(args.get("urls", []), args.get("site_names", []))
         },
     }
     fn = handlers.get(name)
@@ -405,6 +413,100 @@ def _dispatch_tool(name: str, args: dict) -> Any:
     except Exception as e:
         print(f"[Dispatcher] ERROR in {name}: {e}") # Added print log
         return {"error": str(e)}
+
+
+def _resolve_urls(urls, site_names):
+    """Smarter URL resolution with fuzzy matching for site names."""
+    mapping = {
+        "udemy": "https://www.udemy.com",
+        "youtube": "https://www.youtube.com",
+        "google": "https://www.google.com",
+        "facebook": "https://www.facebook.com",
+        "instagram": "https://www.instagram.com",
+        "linkedin": "https://www.linkedin.com/feed",
+        "twitter": "https://x.com",
+        "x": "https://x.com",
+        "github": "https://github.com",
+        "github.com": "https://github.com",
+        "gmail": "https://mail.google.com",
+        "netflix": "https://www.netflix.com",
+        "amazon": "https://www.amazon.com",
+        "amazon.in": "https://www.amazon.in",
+        "flipkart": "https://www.flipkart.com",
+        "chatgpt": "https://chat.openai.com",
+        "gemini": "https://gemini.google.com",
+        "maps": "https://www.google.com/maps",
+        "perplexity": "https://www.perplexity.ai",
+        "canva": "https://www.canva.com",
+        "spotify": "https://open.spotify.com",
+    }
+    
+    resolved = []
+    # 1. Process explicit urls
+    input_urls = [urls] if isinstance(urls, str) else urls
+    for u in input_urls:
+        u = u.strip()
+        if not u: continue
+
+        # --- Aggressive Redirection Logic ---
+        if "google." in u and "/search" in u:
+            try:
+                parsed = urllib.parse.urlparse(u)
+                q_dict = urllib.parse.parse_qs(parsed.query)
+                q = q_dict.get('q', [''])[0].lower().strip()
+                if q in mapping:
+                    resolved.append(mapping[q])
+                    continue
+                # Also try fuzzy match on the extracted query
+                matches = difflib.get_close_matches(q, mapping.keys(), n=1, cutoff=0.85)
+                if matches:
+                    resolved.append(mapping[matches[0]])
+                    continue
+            except: pass
+            
+        clean = u.lower().replace("https://", "").replace("http://", "").split("/")[0]
+        if clean in mapping:
+            resolved.append(mapping[clean])
+        elif u.startswith("http"):
+            resolved.append(u)
+        elif "." in u and " " not in u: # Looks like a domain
+            resolved.append(f"https://{u}")
+        else: # Probably a name or search query
+            name = u.lower()
+            if name in mapping:
+                resolved.append(mapping[name])
+            else:
+                # Try fuzzy
+                matches = difflib.get_close_matches(name, mapping.keys(), n=1, cutoff=0.8)
+                if matches:
+                    resolved.append(mapping[matches[0]])
+                else:
+                    resolved.append(f"https://www.google.com/search?q={urllib.parse.quote(u)}")
+
+    # 2. Process site names
+    names = [site_names] if isinstance(site_names, str) else site_names
+    for name in names:
+        name = name.lower().strip()
+        if not name: continue
+        if name in mapping:
+            url = mapping[name]
+            if url not in resolved:
+                resolved.append(url)
+        else:
+            # Try fuzzy
+            matches = difflib.get_close_matches(name, mapping.keys(), n=1, cutoff=0.8)
+            if matches:
+                url = mapping[matches[0]]
+            elif "." in name and " " not in name:
+                url = f"https://{name}"
+            else:
+                url = f"https://www.google.com/search?q={urllib.parse.quote(name)}"
+            
+            if url not in resolved:
+                resolved.append(url)
+                
+    return list(dict.fromkeys(resolved))
+
 
 def _safe_next(iterator):
     """Safely get next item from iterator to avoid StopIteration issues in asyncio executors."""
@@ -442,9 +544,71 @@ async def _stream_agent(
 
     yield sse({"type": "status", "text": "Processing..."})
 
+    # --- Salary Fast-Path (Force-fetch market data via RAG) ---
+    rag_injection = ""
+    if "Career Rescue" in mode:
+        raw_msg = message.lower() if message else ""
+        if any(k in raw_msg for k in ["salary", "pay", "earn", "lpa", "package", "worth", "stipend"]):
+            # Extract role/loc using our existing robust logic
+            clean_role = _re.sub(r'^["\'\s\?\.,!]+|["\'\s\?\.,!]+$', '', raw_msg)
+            prefixes = [
+                r'^what is the average (?:pay|salary) for a\s+',
+                r'^what is the (?:pay|salary) for a\s+',
+                r'^average (?:pay|salary) for a\s+',
+                r'^(?:pay|salary) for a\s+',
+                r'^what (?:is|does) a?\s+',
+                r'^(?:earn|earns|pay|salary|rate)\s+',
+                r'^find me\s+(?:a\s+)?',
+                r'^search for\s+(?:a\s+)?',
+                r'^about\s+(?:a\s+)?'
+            ]
+            for p in prefixes: clean_role = _re.sub(p, '', clean_role, flags=_re.IGNORECASE)
+            loc = ""
+            if " in " in clean_role:
+                parts = clean_role.split(" in ", 1)
+                clean_role, loc = parts[0].strip(), parts[1].strip()
+            clean_role = _re.sub(r'\s+right now.*$', '', clean_role).strip()
+            loc = _re.sub(r'\s+right now.*$|\?+$', '', loc).strip() if loc else ""
+            
+            if clean_role and len(clean_role) > 2:
+                logger.info(f"[SalaryFastPath] Pre-fetching for: '{clean_role}' in '{loc}'")
+                yield sse({"type": "status", "text": f"Analyzing market trends for {clean_role} in {loc}..."})
+                from tools.search_tools import get_salary_data
+                salary_data = await asyncio.get_event_loop().run_in_executor(
+                    GLOBAL_EXECUTOR, get_salary_data, clean_role, loc
+                )
+                
+                if "NO_DATA_FOUND" in salary_data:
+                    # Professional Fail-safe: Generate direct search links
+                    from urllib.parse import quote
+                    r_enc = quote(clean_role)
+                    l_enc = quote(loc)
+                    pay_links = (
+                        f"I analyzed the latest data but couldn't pull a specific pay scale for **{clean_role}** in **{loc}** right now. "
+                        "However, I've prepared these **Direct Salary Insight Links** for you:\n\n"
+                        f"- [Check **{clean_role}** Salary on Glassdoor](https://www.glassdoor.co.in/Salaries/search?k={r_enc}&locName={l_enc})\n"
+                        f"- [Check **{clean_role}** Salary on AmbitionBox](https://www.ambitionbox.com/salaries/{clean_role.replace(' ', '-')}-salary-in-{loc.replace(' ', '-')})\n"
+                        f"- [Check **{clean_role}** Salary on PayScale](https://www.payscale.com/research/IN/Job={clean_role.replace(' ', '_')}/Salary)\n"
+                    )
+                    rag_injection = f"\n[VERIFIED MARKET DATA]:\n{pay_links}\n"
+                else:
+                    rag_injection = f"\n[VERIFIED LIVE MARKET DATA]:\n{salary_data}\n"
+                
+                # Update inputs list with the injection for the model part
+                if inputs:
+                    inputs[0] = f"{inputs[0]}{rag_injection}"
+
+    # ── Security: Prompt Injection Defense ─────────────────────────────────────
+    _sec_msg = _msg_lower.replace(" ", "")
+    _blocked_phrases = ["ignoreprevious", "systemprompt", "forgetinstructions", "danmode", "developerinstruction", "bypassinstr"]
+    if any(phrase in _sec_msg for phrase in _blocked_phrases):
+        logger.warning(f"[Security] Blocked prompt injection attempt: {_msg_lower[:50]}")
+        yield sse({"type": "text", "text": "🛡️ **Security Alert**: Your input triggered ARIA's internal safety protocols. If you need legitimate help, please rephrase your request safely."})
+        yield sse({"type": "done", "redirect_urls": []})
+        return
+
     # ── Direct Command Parser (quota-free fast path) ──────────────────────────
     # Handles clear action commands WITHOUT calling the LLM to avoid quota hits.
-    import re as _re
     _msg_lower = message.lower().strip() if message else ""
     if not _msg_lower and inputs:
         # Extract text from the last user message in the inputs list
@@ -583,6 +747,12 @@ async def _stream_agent(
     try:
         # Await the session pre-fetch task with a timeout
         chat = await asyncio.wait_for(session_task, timeout=15.0)
+
+        # --- Memory Compression (Context Window Truncation) ---
+        if hasattr(chat, "history") and chat.history and len(chat.history) > 30:
+            logger.info(f"[Memory] Compressing Context Window from {len(chat.history)} to 30 turns.")
+            chat.history = chat.history[-30:]
+
     except Exception as e:
         logger.error(f"[Stream] Session acquisition failed: {e}")
         yield sse({"type": "error", "text": f"Initialization failed: {e}"})
@@ -594,8 +764,21 @@ async def _stream_agent(
         # Always stream text immediately
         stream_iter, chat = await _safe_send(chat, {"content": inputs, "stream": True}, session_id=session_id, mode=mode)
     except Exception as e:
+        err_str = str(e).upper()
         logger.error(f"[Stream] API error: {e}")
-        yield sse({"type": "error", "text": f"API error: {e}"})
+        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            key_count = len(GENAI_CLIENTS) if "GENAI_CLIENTS" in globals() else 1
+            yield sse({"type": "text", "text": (
+                "🛡️ **Gemini Quota Active (Safety Mode)**\n\n"
+                f"Your Gemini API Key (15 RPM Free Tier) is currently heavily loaded. "
+                "Because your project is in **Strict Safety Mode**, most requests are automatically queued, but Google has temporarily paused all incoming traffic for ~60 seconds.\n\n"
+                "**What to do:**\n"
+                "- ⏳ **Wait 30-60 seconds** — This message will clear automatically.\n"
+                "- 🚀 **Want it faster?** — You are currently using **1 API key**. To handle more messages/minute, you can add keys from *different* Google accounts to your `.env` file.\n"
+                "- 🗓️ **Daily Limit** — Remember the free tier has a 1,500 request/day limit."
+            )})
+        else:
+            yield sse({"type": "error", "text": f"API error: {e}"})
         return
         
     logger.info(f"[Stream] Stream initialized.")
@@ -631,14 +814,16 @@ async def _stream_agent(
             full_text += chunk_text
             yield sse({"type": "text", "text": full_text})
 
+        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+            u = chunk.usage_metadata
+            m_name = getattr(chat, "_active_model", "Unknown Model")
+            logger.info(f"🪙  [Token Usage] Model: {m_name} | Request: {u.prompt_token_count} | Response: {u.candidates_token_count} | Total: {u.total_token_count}")
+
     response = None # Track if we got any meaningful data from tools to use as fallback if model is static
     combined_tool_output = ""
     
     if first_tool_calls:
         # Create a mock response object so the tool loop can read it
-        class MockPart:
-            def __init__(self, fc):
-                self.function_call = fc
         class MockContent:
             def __init__(self, parts):
                 self.parts = parts
@@ -649,8 +834,7 @@ async def _stream_agent(
             def __init__(self, candidates):
                 self.candidates = candidates
         
-        mock_parts_list = [MockPart(fc) for fc in first_tool_calls]
-        response = MockResponse([MockCandidate(MockContent(mock_parts_list))])
+        response = MockResponse([MockCandidate(MockContent(first_tool_calls))])
 
     redirect_urls: List[str] = []
 
@@ -677,26 +861,41 @@ async def _stream_agent(
 
         tool_responses: List[types.Part] = []
 
-        future_to_call = {
-            asyncio.get_event_loop().run_in_executor(
+        tasks_meta = []
+        awaitable_tasks = []
+        for c in valid_tool_calls:
+            tool_name = getattr(c.function_call, "name", "")
+            call_id = getattr(c.function_call, "id", "")
+            
+            task = asyncio.get_event_loop().run_in_executor(
                 GLOBAL_EXECUTOR,
                 _dispatch_tool,
-                getattr(c.function_call, "name", ""),
+                tool_name,
                 dict(c.function_call.args or {}),
-            ): (getattr(c.function_call, "name", ""), getattr(c.function_call, "id", ""))
-            for c in valid_tool_calls
-        }
+            )
+            awaitable_tasks.append(task)
+            tasks_meta.append((tool_name, call_id))
+            
+            yield sse({"type": "status", "text": f"Running {tool_name}..."})
+            yield sse({"type": "tool_start", "name": tool_name})
+            
+        results = await asyncio.gather(*awaitable_tasks, return_exceptions=True)
 
-        for c in valid_tool_calls:
-            fname = getattr(c.function_call, "name", "tool")
-            yield sse({"type": "status", "text": f"Running {fname}..."})
-            yield sse({"type": "tool_start", "name": fname})
+        for (tool_name, call_id), result in zip(tasks_meta, results):
+            if isinstance(result, Exception):
+                logger.error(f"[Tool] {tool_name} exception: {result}")
+                tool_responses.append(
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=tool_name,
+                            id=call_id,
+                            response={"result": f"Tool error ({result})."}
+                        )
+                    )
+                )
+                continue
 
-        for future in asyncio.as_completed(future_to_call):
-            tool_name, call_id = future_to_call[future]
             try:
-                result = await future
-
                 if tool_name == "get_map_distance" and isinstance(result, dict):
                     if "url" in result:
                         redirect_urls.append(result["url"])
@@ -743,27 +942,30 @@ async def _stream_agent(
                     types.Part(
                         function_response=types.FunctionResponse(
                             name=tool_name,
+                            id=call_id,
                             response={"result": result_str}
                         )
                     )
                 )
-
             except Exception as err:
-                    logger.error(f"[Tool] {tool_name} exception: {err}")
-                    tool_responses.append(
-                        types.Part(
-                            function_response=types.FunctionResponse(
-                                name=tool_name,
-                                response={"result": f"Tool error ({err})."}
-                            )
+                logger.error(f"[Tool] {tool_name} post-processing exception: {err}")
+                tool_responses.append(
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=tool_name,
+                            id=call_id,
+                            response={"result": f"Tool error ({err})."}
                         )
                     )
+                )
 
         if tool_responses:
             yield sse({"type": "status", "text": "🧠 Neural Synthesis In Progress…"})
             yield sse({"type": "status", "text": "⚙️ Processing…"})
             try:
-                stream_iter, chat = await _safe_send(chat, {"content": tool_responses, "stream": True}, session_id=session_id, mode=mode)
+                # CRITICAL: Wrap in Content with role='function' to satisfy Gemini sequence requirements
+                tool_content = types.Content(role="function", parts=tool_responses)
+                stream_iter, chat = await _safe_send(chat, {"content": tool_content, "stream": True}, session_id=session_id, mode=mode)
                 
                 next_tool_calls = []
                 # Keep accumulating on top of what was already printed from tool logs or prompt
@@ -788,10 +990,21 @@ async def _stream_agent(
                     if chunk_text:
                         full_text += chunk_text
                         yield sse({"type": "text", "text": full_text})
+
+                    if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                        u = chunk.usage_metadata
+                        m_name = getattr(chat, "_active_model", "Unknown Model")
+                        logger.info(f"🪙  [Token Usage] Model: {m_name} | Request: {u.prompt_token_count} | Response: {u.candidates_token_count} | Total: {u.total_token_count}")
+                        
+                        yield sse({
+                            "type": "token_usage",
+                            "prompt": u.prompt_token_count,
+                            "response": u.candidates_token_count,
+                            "total": u.total_token_count
+                        })
                 
                 if next_tool_calls:
-                    mock_parts_list = [MockPart(fc) for fc in next_tool_calls]
-                    response = MockResponse([MockCandidate(MockContent(mock_parts_list))])
+                    response = MockResponse([MockCandidate(MockContent(next_tool_calls))])
                 else:
                     response = None
             except Exception as e:
@@ -808,29 +1021,64 @@ async def _stream_agent(
                 full_text = "I've gathered the following information for you:\n" + combined_tool_output.replace("Result: ", "").replace("Tool: search_jobs", "### 🔍 Job Search Results").strip()
                 yield sse({"type": "text", "text": full_text})
             elif "Career Rescue" in mode:
-                # Dynamic Fail-safe: Extract role/location from user message if model failed to call tool
+                # Dynamic Fail-safe: Extract role/location and determine intent (Salary vs Job)
                 from urllib.parse import quote
                 raw_msg = message.lower() if message else ""
                 
-                # Heuristic extraction: "X jobs in Y" -> role=X, loc=Y
-                role, loc = "jobs", ""
-                if " in " in raw_msg:
-                    parts = raw_msg.split(" in ", 1)
-                    role, loc = parts[0].strip(), parts[1].strip()
-                elif " for " in raw_msg:
-                    parts = raw_msg.split(" for ", 1)
-                    role, loc = parts[0].strip(), parts[1].strip()
-                else:
-                    role = raw_msg.strip()
+                # Intent Detection
+                is_salary_query = any(k in raw_msg for k in ["salary", "pay", "earn", "lpa", "package", "worth", "stipend"])
+                
+                # Advanced Cleanup: Iteratively strip common prefixes and symbols
+                clean_role = raw_msg
+                # 1. Strip leading/trailing symbols, quotes, and punctuation
+                clean_role = _re.sub(r'^["\'\s\?\.,!]+|["\'\s\?\.,!]+$', '', clean_role)
+                # 2. Iteratively strip common career-search prefixes
+                prefixes = [
+                    r'^what is the average (?:pay|salary) for a\s+',
+                    r'^what is the (?:pay|salary) for a\s+',
+                    r'^average (?:pay|salary) for a\s+',
+                    r'^(?:pay|salary) for a\s+',
+                    r'^what (?:is|does) a?\s+',
+                    r'^(?:earn|earns|pay|salary|rate)\s+',
+                    r'^find me\s+(?:a\s+)?',
+                    r'^search for\s+(?:a\s+)?',
+                    r'^about\s+(?:a\s+)?',
+                    r'^show me\s+(?:a\s+)?'
+                ]
+                for p in prefixes:
+                    clean_role = _re.sub(p, '', clean_role, flags=_re.IGNORECASE)
+                
+                # 3. Handle location split
+                loc = ""
+                if " in " in clean_role:
+                    parts = clean_role.split(" in ", 1)
+                    clean_role, loc = parts[0].strip(), parts[1].strip()
+                elif " at " in clean_role:
+                    parts = clean_role.split(" at ", 1)
+                    clean_role, loc = parts[0].strip(), parts[1].strip()
 
-                r_enc, l_enc = quote(role), quote(loc)
+                # 4. Final polish
+                clean_role = _re.sub(r'\s+right now.*$', '', clean_role).strip()
+                loc = _re.sub(r'\s+right now.*$|\?+$', '', loc).strip()
                 
-                logger.warning(f"[Stream] Model silence detected in Career Mode. Triggering Dynamic Portal Fail-safe for: '{role}' in '{loc}'")
+                # Fallback if cleanup was too aggressive
+                if not clean_role or len(clean_role) < 2:
+                    clean_role = "Career Opportunities"
                 
-                full_text = f"I analyzed the data but couldn't pull specific live links for **{role}** in **{loc}** right now. However, I've prepared these **Direct Portal Search Links** which will take you straight to the latest postings:\n\n"
-                full_text += f"- [Search **{role}** on LinkedIn](https://www.linkedin.com/jobs/search/?keywords={r_enc}&location={l_enc})\n"
-                full_text += f"- [Search **{role}** on Internshala](https://internshala.com/internships/keywords-{r_enc}/location-{l_enc})\n"
-                full_text += f"- [Search **{role}** on Naukri](https://www.naukri.com/{r_enc.replace('%20', '-')}-jobs-in-{l_enc.replace('%20', '-')})\n"
+                r_enc, l_enc = quote(clean_role), quote(loc)
+                
+                if is_salary_query:
+                    logger.warning(f"[Stream] Salary fail-safe triggered for: '{clean_role}' in '{loc}'")
+                    full_text = f"I analyzed the data but couldn't pull specific pay scales for **{clean_role}** in **{loc}** right now. However, I've prepared these **Direct Salary Insight Links** for you:\n\n"
+                    full_text += f"- [Check **{clean_role}** Salary on Glassdoor](https://www.glassdoor.co.in/Salaries/search?k={r_enc}&locName={l_enc})\n"
+                    full_text += f"- [Check **{clean_role}** Salary on AmbitionBox](https://www.ambitionbox.com/salaries/{r_enc.replace('%20', '-')}-salary-in-{l_enc.replace('%20', '-')})\n"
+                    full_text += f"- [Check **{clean_role}** Salary on PayScale](https://www.payscale.com/research/IN/Job={r_enc.replace('%20', '_')}/Salary)\n"
+                else:
+                    logger.warning(f"[Stream] Job fail-safe triggered for: '{clean_role}' in '{loc}'")
+                    full_text = f"I analyzed the data but couldn't pull specific live links for **{clean_role}** in **{loc}** right now. However, I've prepared these **Direct Portal Search Links** for you:\n\n"
+                    full_text += f"- [Search **{clean_role}** on LinkedIn](https://www.linkedin.com/jobs/search/?keywords={r_enc}&location={l_enc})\n"
+                    full_text += f"- [Search **{clean_role}** on Internshala](https://internshala.com/internships/keywords-{r_enc}/location-{l_enc})\n"
+                    full_text += f"- [Search **{clean_role}** on Naukri](https://www.naukri.com/{r_enc.replace('%20', '-')}-jobs-in-{l_enc.replace('%20', '-')})\n"
                 yield sse({"type": "text", "text": full_text})
             else:
                 logger.warning(f"[Stream] Empty response detected for session {session_id}.")
@@ -950,7 +1198,10 @@ async def chat_stream(req: ChatRequest):
 
     # ── Text message with system directive ────────────────────────────────────
     if req.message:
+        # --- REAL-TIME RAG & SPECIALIZED INJECTIONS ───────────────────────────
         rag_injection = ""
+        
+        # 2. Existing Knowledge RAG
         if req.mode in ["Legal Shield Mode", "Health Navigator Mode"]:
             try:
                 from core.rag_engine import search_knowledge
@@ -963,19 +1214,29 @@ async def chat_stream(req: ChatRequest):
 
         final_message = req.message
         if "Career Rescue" in req.mode:
-            job_keywords = ["job", "internship", "opening", "hiring", "recruitment", "vacancy"]
-            if any(kw in final_message.lower() for kw in job_keywords):
-                final_message += "\n\n[SYSTEM INSTRUCTION:\n- For all internship and job searches, YOU MUST call the search_jobs tool. If you do not, the user will be disappointed. This is your primary purpose.\n- After calling search_jobs, present the matches clearly. Do NOT say you can't find anything if the tool gives you portal links.\nALWAYS use the 'search_jobs' tool to find actual links for this request. Do NOT answer from your own knowledge alone.]"
+            # We separate the message from the instruction to give more weight to the tool-use directive
+            # If we have RAG data (Salary Fast-Path), inject it here
+            inputs.append(f"{final_message}{rag_injection}")
+            
+            # Identify special rules to inject
+            rules = "\n\n[MANDATORY Career Agent Directives]:\n"
+            if any(kw in final_message.lower() for kw in ["job", "internship", "hiring", "opening"]):
+                rules += "- Search for live jobs/internships using 'search_jobs'.\n"
+            if any(kw in final_message.lower() for kw in ["salary", "pay", "earn", "lpa", "package"]):
+                rules += "- Search for real-time salary insights using 'get_salary_data'.\n"
             
             roadmap_keywords = ["roadmap", "career path", "step-by-step", "timeline", "how to become", "path to become"]
             if any(kw in final_message.lower() for kw in roadmap_keywords):
-                # Extract the topic from the message and completely rewrite it to force Mermaid output
-                final_message = (
-                    f"Output ONLY a mermaid diagram based on this request: '{req.message}'. "
-                    "No text. No bullets. No headings. Only the mermaid code block, nothing else."
-                )
+                # We override final_message here to force the model to ONLY output mermaid
+                final_message = f"Output ONLY a mermaid diagram showing a step-by-step career path for: '{req.message}'. No other text."
 
-        inputs.append(f"{final_message}{rag_injection}")
+            # Scorecard rules (always active for files or explicit asks)
+            rules += "- For career documents (Resume/CV/Cover Letter), YOU MUST output a clean **AI Resume/Application Scorecard** with Match %, Strengths, Gaps, and ATS Bridge.\n"
+            rules += "- Do NOT provide a standard text summary for career documents.\n"
+            
+            inputs.append(rules)
+        else:
+            inputs.append(f"{final_message}{rag_injection}")
 
     if not inputs:
         raise HTTPException(400, "No input provided")
@@ -1003,11 +1264,13 @@ async def upload_analyze(
 
     if fname.endswith(".pdf"):
         text = read_pdf_file_from_stream(io.BytesIO(content))
-        inputs.append(f"PDF '{file.filename}':\n\n{text}\n\nAnalyze and summarize.")
+        instr = "MANDATORY: Generate a professional AI Scorecard for this career document/resume. Extract skills, provide an ATS Match %, and identify missing keywords." if "Career Rescue" in mode else "Analyze and summarize."
+        inputs.append(f"PDF '{file.filename}':\n\n{text}\n\n{instr}")
 
     elif fname.endswith(".docx"):
         text = read_docx_file_from_stream(io.BytesIO(content))
-        inputs.append(f"Word doc '{file.filename}':\n\n{text}\n\nAnalyze and summarize.")
+        instr = "MANDATORY: Generate a professional AI Scorecard for this career document/resume. Extract skills, provide an ATS Match %, and identify missing keywords." if "Career Rescue" in mode else "Analyze and summarize."
+        inputs.append(f"Word doc '{file.filename}':\n\n{text}\n\n{instr}")
 
     elif fname.endswith(".pptx"):
         text = read_ppt_file_from_stream(io.BytesIO(content))
@@ -1026,7 +1289,9 @@ async def upload_analyze(
 
     else:
         try:
-            inputs.append(f"File '{file.filename}':\n\n{content.decode('utf-8')}")
+            text = content.decode('utf-8')
+            instr = "Analyze this as a professional career document/resume for a Scorecard." if "Career Rescue" in mode else "Analyze this document."
+            inputs.append(f"File '{file.filename}':\n\n{text}\n\n{instr}")
         except UnicodeDecodeError:
             raise HTTPException(400, "Unsupported binary file type")
 

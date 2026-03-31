@@ -71,6 +71,21 @@ def create_agent_session(client, mode, history=None, model: str = "gemini-2.0-fl
             },
         ),
         types.FunctionDeclaration(
+            name="get_salary_data",
+            description=(
+                "Call this to find real-time salary ranges, pay scales, and market trends for any job role and location. "
+                "Use whenever the user asks 'how much does X earn', 'salary for X', or 'market trends for X'."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {
+                    "role": {"type": "STRING", "description": "Job title, e.g. 'Data Scientist'"},
+                    "location": {"type": "STRING", "description": "City, e.g. 'Bangalore'"},
+                },
+                "required": ["role", "location"],
+            },
+        ),
+        types.FunctionDeclaration(
             name="get_map_distance",
             description=(
                 "Get driving distance, travel time, and directions between two locations. "
@@ -121,7 +136,10 @@ def create_agent_session(client, mode, history=None, model: str = "gemini-2.0-fl
             name="open_website",
             description=(
                 "Open one or more websites in the user's browser. "
-                "Call when user says 'open [site]', 'go to [site]'. Always use full https:// URLs. "
+                "ALWAYS call open_website when user says \"open [site]\" or \"go to [site]\".\n"
+                "- CRITICAL: Try to provide the DIRECT URL (e.g. https://www.udemy.com, https://www.youtube.com).\n"
+                "- ONLY use a Google Search URL if the site is obscure and you cannot find a direct link after searching.\n"
+                "- If you are unsure of the URL, pass the site name in the 'site_names' parameter. Always use full https:// URLs. "
                 "CRUCIAL: Browsers block automatic popups. When using this tool, you MUST explicitly "
                 "tell the user: 'I have generated the links for you. Please click the chips below to open them.'"
             ),
@@ -132,10 +150,18 @@ def create_agent_session(client, mode, history=None, model: str = "gemini-2.0-fl
                         "type": "ARRAY",
                         "items": {"type": "STRING"},
                         "description": (
-                            "List of full URLs with https://. "
-                            "Examples: ['https://youtube.com', 'https://google.com']"
+                            "List of full URLs with https:// (e.g., 'https://www.udemy.com'). "
+                            "Priority: If you know the direct URL, use it."
                         ),
-                    }
+                    },
+                    "site_names": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                        "description": (
+                            "List of site names if you don't know the exact URL (e.g., 'udemy', 'youtube'). "
+                            "The system will attempt to resolve these to direct URLs."
+                        ),
+                    },
                 },
                 "required": ["urls"],
             },
@@ -181,10 +207,43 @@ def create_agent_session(client, mode, history=None, model: str = "gemini-2.0-fl
         ),
     ]
 
-    # Reverted native search grounding due to SDK incompatibility with Function Declarations
-    tools = [
-        types.Tool(function_declarations=tool_declarations),
-    ]
+    # Dynamic Tool Filtering Based on Mode (Strict Allowlisting)
+    filtered_declarations = []
+    for td in tool_declarations:
+        if mode == "General Assistant":
+            if td.name in ["get_system_info", "get_weather", "get_realtime_data", "get_map_distance", "send_email", "open_website", "convert_to_pdf", "store_memory"]:
+                filtered_declarations.append(td)
+        elif mode == "Shield Mode":
+            if td.name in ["get_realtime_data", "open_website", "store_memory", "convert_to_pdf"]:
+                filtered_declarations.append(td)
+        elif mode == "Career Rescue Mode":
+            if td.name in ["search_jobs", "get_salary_data", "get_realtime_data", "send_email", "convert_to_pdf", "store_memory", "open_website"]:
+                filtered_declarations.append(td)
+        elif mode == "Legal Shield Mode":
+            if td.name in ["get_realtime_data", "convert_to_pdf", "store_memory", "open_website"]:
+                filtered_declarations.append(td)
+        elif mode == "Finance Guard Mode":
+            if td.name in ["get_realtime_data", "convert_to_pdf", "store_memory", "open_website"]:
+                filtered_declarations.append(td)
+        elif mode == "Health Navigator Mode":
+            if td.name in ["get_realtime_data", "convert_to_pdf", "store_memory", "open_website"]:
+                filtered_declarations.append(td)
+        elif mode == "Mind Support Mode":
+            if td.name in ["store_memory", "get_realtime_data", "open_website"]:
+                filtered_declarations.append(td)
+        elif mode == "Vision Mode":
+            if td.name in ["get_realtime_data", "get_weather", "store_memory"]:
+                filtered_declarations.append(td)
+        elif mode == "Sign Detection":
+            if td.name in ["get_realtime_data", "store_memory"]:
+                filtered_declarations.append(td)
+        else:
+            # If the agent is not in the strict whitelist, give it no special tools (or add logic here later)
+            pass
+
+    tools = []
+    if filtered_declarations:
+        tools.append(types.Tool(function_declarations=filtered_declarations))
 
     # All safety filters off — ARIA is unrestricted
     safety_settings = [

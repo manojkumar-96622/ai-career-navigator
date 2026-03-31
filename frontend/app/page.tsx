@@ -110,7 +110,8 @@ const ChatInput = React.memo(({
   fileInputRef,
   handleFileChange,
   startWebcam,
-  soundOn
+  soundOn,
+  isStreaming
 }: any) => {
   const [localValue, setLocalValue] = useState("");
   const [isFocused, setIsFocused] = useState(false);
@@ -128,7 +129,7 @@ const ChatInput = React.memo(({
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         
         {/* Suggestion Chips - Now More Subtle */}
-        {!localValue && activeAgent.suggestions && (
+        {!localValue && !isStreaming && activeAgent.suggestions && (
           <div className="flex flex-wrap gap-2 justify-center pb-2">
             {activeAgent.suggestions.map((suggestion: string, idx: number) => (
               <button
@@ -675,6 +676,7 @@ export default function ARIAInterface() {
   const gainRef = useRef<GainNode | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -682,8 +684,12 @@ export default function ARIAInterface() {
   const prevStreamingRef = useRef(false);
 
   useEffect(() => {
-    if (isStreaming && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    if (isStreaming && messagesEndRef.current && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 150;
+      if (isAtBottom) {
+        messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      }
     }
   }, [chatHistories, isStreaming]);
 
@@ -862,7 +868,13 @@ export default function ARIAInterface() {
   };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messagesEndRef.current && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 150;
+      if (isAtBottom) {
+        messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      }
+    }
   }, [chatHistories, activeAgent]);
 
   useEffect(() => {
@@ -1781,7 +1793,10 @@ export default function ARIAInterface() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+            <div 
+              ref={scrollContainerRef}
+              className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
+            >
               {activeMessages.map((msg) => (
                 <MemoizedChatMessage
                   key={msg.id}
@@ -1819,6 +1834,7 @@ export default function ARIAInterface() {
               handleFileChange={handleFileChange}
               startWebcam={startWebcam}
               soundOn={soundOn}
+              isStreaming={isStreaming}
             />
           </motion.div>
         )}

@@ -1,9 +1,9 @@
-// frontend/app/agentRouter.ts
 import { runCareerAgent } from "./careerRescueAgent";
 import { runLegalAgent } from "./legalShieldAgent";
 import { runFinanceAgent } from "./financeGuardAgent";
 import { runHealthAgent } from "./healthNavigatorAgent";
 import { runMindAgent } from "./mindSupportAgent";
+import { runShieldAgent } from "./shieldModeAgent";
 
 // Map string names to the actual instantiated functions
 const AGENT_MAP: Record<string, Function> = {
@@ -11,7 +11,8 @@ const AGENT_MAP: Record<string, Function> = {
     "LegalShieldAgent": runLegalAgent,
     "FinanceGuardAgent": runFinanceAgent,
     "HealthNavigatorAgent": runHealthAgent,
-    "MindSupportAgent": runMindAgent
+    "MindSupportAgent": runMindAgent,
+    "ShieldModeAgent": runShieldAgent
 };
 
 export type AgentResults = {
@@ -20,6 +21,7 @@ export type AgentResults = {
     financeHelp: any | null;
     healthHelp: any | null;
     mindSupport: any | null;
+    shieldHelp: any | null;
 };
 
 export async function routeToAgents(
@@ -35,7 +37,8 @@ export async function routeToAgents(
         legalHelp: null,
         financeHelp: null,
         healthHelp: null,
-        mindSupport: null
+        mindSupport: null,
+        shieldHelp: null
     };
 
     // Mark agents that are not active as SKIPPED
@@ -106,6 +109,7 @@ export async function routeToAgents(
             if (name === "FinanceGuardAgent") results.financeHelp = data;
             if (name === "HealthNavigatorAgent") results.healthHelp = data;
             if (name === "MindSupportAgent" && !results.mindSupport) results.mindSupport = data;
+            if (name === "ShieldModeAgent") results.shieldHelp = data;
         }
     });
 

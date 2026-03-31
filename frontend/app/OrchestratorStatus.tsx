@@ -17,7 +17,8 @@ const AGENT_META: Record<string, { name: string; icon: string }> = {
     "LegalShieldAgent": { name: "Legal Shield", icon: "⚖️" },
     "FinanceGuardAgent": { name: "Finance Guard", icon: "💰" },
     "HealthNavigatorAgent": { name: "Health Navigator", icon: "🏥" },
-    "MindSupportAgent": { name: "Mind Support", icon: "🧠" }
+    "MindSupportAgent": { name: "Mind Support", icon: "🧠" },
+    "ShieldModeAgent": { name: "Shield Mode", icon: "🛡️" }
 };
 
 export function OrchestratorStatus({
@@ -87,7 +88,7 @@ export function OrchestratorStatus({
                         </div>
                         <div className="text-center px-4">
                             <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Agents Fired</p>
-                            <p className="text-sm font-mono text-cyan-300">{agentsFired} / 5</p>
+                            <p className="text-sm font-mono text-cyan-300">{agentsFired} / 6</p>
                         </div>
                     </div>
                 </div>
